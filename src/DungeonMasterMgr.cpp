@@ -850,13 +850,14 @@ std::vector<SpawnPoint> DungeonMasterMgr::GetSpawnPointsForMap(uint32 mapId)
     char bq[512];
     snprintf(bq, sizeof(bq),
         "SELECT c.position_x, c.position_y, c.position_z, c.orientation, "
-        "ct.mechanic_immune_mask, ct.`rank`, ct.name "
+        "COALESCE(ci.MechanicsMask, 0), ct.`rank`, ct.name "
         "FROM creature c "
         "JOIN creature_template ct ON c.id1 = ct.entry "
+        "LEFT JOIN creature_immunities ci ON ci.ID = ct.CreatureImmunitiesId "
         "WHERE c.map = %u "
-        "AND ct.mechanic_immune_mask > 0 "
+        "AND COALESCE(ci.MechanicsMask, 0) > 0 "
         "AND ct.`rank` >= 1 "
-        "ORDER BY ct.mechanic_immune_mask DESC",
+        "ORDER BY COALESCE(ci.MechanicsMask, 0) DESC",
         mapId);
     QueryResult bossResult = WorldDatabase.Query(bq);
 
@@ -866,7 +867,7 @@ std::vector<SpawnPoint> DungeonMasterMgr::GetSpawnPointsForMap(uint32 mapId)
         struct BossCandidate {
             float x, y, z, o;
             float dist;
-            uint32 immuneMask;
+            uint64 immuneMask;
             std::string name;
         };
         std::vector<BossCandidate> bosses;
@@ -879,7 +880,7 @@ std::vector<SpawnPoint> DungeonMasterMgr::GetSpawnPointsForMap(uint32 mapId)
             bc.y = f[1].Get<float>();
             bc.z = f[2].Get<float>();
             bc.o = f[3].Get<float>();
-            bc.immuneMask = f[4].Get<uint32>();
+            bc.immuneMask = f[4].Get<uint64>();
             bc.name = f[6].Get<std::string>();
 
             float dx = bc.x - ex, dy = bc.y - ey, dz = bc.z - ez;
