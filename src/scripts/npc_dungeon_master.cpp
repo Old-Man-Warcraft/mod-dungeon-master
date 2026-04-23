@@ -328,12 +328,19 @@ private:
         const DifficultyTier* diff = sDMConfig->GetDifficulty(sel.DifficultyId);
         if (!diff) { player->PlayerTalkClass->SendCloseGossip(); return; }
 
-        uint8 partyLevel = sDungeonMasterMgr->ComputeEffectiveLevel(player);
+        uint8 rawParty   = sDungeonMasterMgr->ComputeEffectiveLevel(player);
+        uint8 partyLevel = sDungeonMasterMgr->ComputeEffectiveLevelForDifficulty(player, sel.DifficultyId);
 
         char buf1[256], buf2[256];
-        snprintf(buf1, sizeof(buf1),
-            "|cFF00FF00Scale to Party Level|r (Lv %u) — Full challenge at your level",
-            partyLevel);
+        if (rawParty != partyLevel)
+            snprintf(buf1, sizeof(buf1),
+                "|cFF00FF00Scale to Party Level|r (|cFFFFFFFF%u|r → |cFFFFFFFF%u|r for tier %u-%u) — "
+                "Mobs use the capped level",
+                rawParty, partyLevel, diff->MinLevel, diff->MaxLevel);
+        else
+            snprintf(buf1, sizeof(buf1),
+                "|cFF00FF00Scale to Party Level|r (Lv %u) — Full challenge at your level",
+                partyLevel);
         snprintf(buf2, sizeof(buf2),
             "|cFFFFD700Use Dungeon Difficulty|r (Lv %u-%u) — Original difficulty range",
             diff->MinLevel, diff->MaxLevel);
@@ -750,11 +757,26 @@ private:
     {
         player->PlayerTalkClass->ClearMenus();
 
-        uint8 partyLevel = sDungeonMasterMgr->ComputeEffectiveLevel(player);
+        PlayerDMSelection sel;
+        { std::lock_guard<std::mutex> lk(sSelMutex);
+          auto it = sSelections.find(player->GetGUID());
+          if (it == sSelections.end()) { player->PlayerTalkClass->SendCloseGossip(); return; }
+          sel = it->second; }
+
+        const DifficultyTier* diff = sDMConfig->GetDifficulty(sel.DifficultyId);
+        if (!diff) { player->PlayerTalkClass->SendCloseGossip(); return; }
+
+        uint8 rawParty   = sDungeonMasterMgr->ComputeEffectiveLevel(player);
+        uint8 partyLevel = sDungeonMasterMgr->ComputeEffectiveLevelForDifficulty(player, sel.DifficultyId);
 
         char buf1[256], buf2[256];
-        snprintf(buf1, sizeof(buf1),
-            "|cFF00FF00Scale to Party Level|r (Lv %u)", partyLevel);
+        if (rawParty != partyLevel)
+            snprintf(buf1, sizeof(buf1),
+                "|cFF00FF00Scale to Party Level|r (|cFFFFFFFF%u|r → |cFFFFFFFF%u|r for tier %u-%u)",
+                rawParty, partyLevel, diff->MinLevel, diff->MaxLevel);
+        else
+            snprintf(buf1, sizeof(buf1),
+                "|cFF00FF00Scale to Party Level|r (Lv %u)", partyLevel);
         snprintf(buf2, sizeof(buf2),
             "|cFFFFD700Use Dungeon Difficulty|r — Original level ranges");
 

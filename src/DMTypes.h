@@ -9,6 +9,7 @@
 #include "Define.h"
 #include "ObjectGuid.h"
 #include "Position.h"
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -48,6 +49,12 @@ struct DifficultyTier
 
     bool IsValidForLevel(uint8 level) const { return level >= MinLevel; }
     bool IsOnLevelFor(uint8 level) const { return level >= MinLevel && level <= MaxLevel; }
+
+    /// Clamp a party / raw level into this tier (used for mob banding, rewards, UI).
+    uint8 ClampLevel(uint8 level) const
+    {
+        return std::min(MaxLevel, std::max(MinLevel, level));
+    }
 };
 
 // Groups creature types for themed spawns; -1 = any type

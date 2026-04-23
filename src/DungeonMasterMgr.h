@@ -36,6 +36,7 @@ public:
     Session*  CreateSession(Player* leader, uint32 difficultyId, uint32 themeId, uint32 mapId, bool scaleToParty = true);
     Session*  GetSession(uint32 sessionId);
     Session*  GetSessionByInstance(uint32 instanceId);
+    void      RegisterSessionInstance(uint32 sessionId, uint32 instanceId);
     Session*  GetSessionByPlayer(ObjectGuid playerGuid);
     void      EndSession(uint32 sessionId, bool success);
     void      AbandonSession(uint32 sessionId);
@@ -88,14 +89,16 @@ public:
     Position    GetDungeonEntrance(uint32 mapId);
     std::string GetSessionStatusString(const Session* session) const;
     uint8       ComputeEffectiveLevel(Player* leader) const;
+    /// Party average (or solo level), clamped to the difficulty tier for scaling / display.
+    uint8       ComputeEffectiveLevelForDifficulty(Player* leader, uint32 difficultyId) const;
 
     void   DistributeRoguelikeRewards(uint32 tier, uint8 effectiveLevel,
                                        const std::vector<ObjectGuid>& playerGuids);
 
 private:
     std::vector<SpawnPoint> GetSpawnPointsForMap(uint32 mapId);
-    uint32 SelectCreatureForTheme(const Theme* theme, bool isBoss);
-    uint32 SelectDungeonBoss(const Theme* theme);
+    uint32 SelectCreatureForTheme(const Theme* theme, bool isBoss, uint8 bandMin, uint8 bandMax);
+    uint32 SelectDungeonBoss(const Theme* theme, uint8 bandMin, uint8 bandMax);
 
     void   GiveGoldReward(Player* player, uint32 amount);
     void   GiveItemReward(Player* player, uint8 rewardLevel, uint8 quality);

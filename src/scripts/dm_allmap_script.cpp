@@ -57,6 +57,7 @@ public:
             return;
 
         session->InstanceId = instance->GetInstanceId();
+        sDungeonMasterMgr->RegisterSessionInstance(session->SessionId, session->InstanceId);
 
         ChatHandler(player->GetSession()).SendSysMessage(
             "|cFF00FF00[Dungeon Master]|r Preparing the challenge...");
@@ -70,9 +71,9 @@ public:
         char buf[256];
         snprintf(buf, sizeof(buf),
             "|cFF00FF00[Dungeon Master]|r |cFFFFFFFF%u|r enemies and |cFFFFFFFF%u|r boss(es) spawned. "
-            "Creature levels: |cFFFFFFFF%u-%u|r. Good luck!",
+            "Enemy level: |cFFFFFFFF%u|r (tier band |cFFFFFFFF%u-%u|r). Good luck!",
             session->TotalMobs, session->TotalBosses,
-            session->LevelBandMin, session->LevelBandMax);
+            session->EffectiveLevel, session->LevelBandMin, session->LevelBandMax);
         ChatHandler(player->GetSession()).SendSysMessage(buf);
     }
 };

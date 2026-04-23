@@ -7,8 +7,6 @@
 #include "DungeonMasterMgr.h"
 #include "RoguelikeMgr.h"
 #include "DMConfig.h"
-#include "SpellMgr.h"
-#include "SpellInfo.h"
 #include "Log.h"
 
 using namespace DungeonMaster;
@@ -31,18 +29,11 @@ public:
             return;
         }
 
-        // Patch Greater Blessing of Kings (25898) to allow stacking.
-        // The base DBC has StackAmount=0 which prevents the client from
-        // showing a stack count on the buff icon.  Setting it server-side
-        // to 20 lets SetStackAmount() work and the client renders "2", "3"
-        // etc. on the icon during roguelike runs.
-        SpellInfo* bokInfo = const_cast<SpellInfo*>(
-            sSpellMgr->GetSpellInfo(25898));
-        if (bokInfo)
-        {
-            bokInfo->StackAmount = 255;
-            LOG_INFO("module", "DungeonMaster: Patched BoK (25898) StackAmount → 255 for roguelike buff stacking.");
-        }
+        // Do NOT patch SpellInfo for 25898 (Greater Blessing of Kings). A global
+        // StackAmount > 0 makes Unit::_TryStackingOrRefreshingExistingAura use
+        // Aura::ModStackAmount(1) on refresh; for non-stacking spells the core
+        // only clamps to 1 stack when DBC StackAmount is 0, so refreshes would
+        // incorrectly climb into multi-stack "Greater Blessing of Kings".
 
         sDungeonMasterMgr->Initialize();
         sRoguelikeMgr->Initialize();

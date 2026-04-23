@@ -46,8 +46,10 @@ DungeonMaster.Difficulty.10 = ""
 #
 # LEVEL BAND  (NEW — fixes mixed-level creature spawns)
 #   Creatures are selected within EffectiveLevel ± LevelBand.
-#   EffectiveLevel = solo player's level, or group average level.
-#   The band is also clamped to the difficulty tier's min/max range.
+#   EffectiveLevel = solo player's level, or group average level, then clamped
+#   to the difficulty tier's min/max (so high-level party members cannot push
+#   Novice-tier runs above that tier's max level).
+#   The selection band is also clamped to the tier's min/max range.
 #
 #   Example: Level 35 player, LevelBand=3, Journeyman (30-44)
 #            → creatures must be level 32-38.

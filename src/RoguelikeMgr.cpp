@@ -577,13 +577,18 @@ void RoguelikeMgr::EndRun(uint32 runId, bool announceResults)
     // Distribute roguelike rewards (scaled by tier)
     if (run->DungeonsCleared > 0)
     {
-        // Compute effective level from the leader (or first available player)
-        uint8 effectiveLevel = 1;
-        for (const auto& pd : run->Players)
-        {
-            Player* p = ObjectAccessor::FindPlayer(pd.PlayerGuid);
-            if (p) { effectiveLevel = p->GetLevel(); break; }
-        }
+        // Party average level (same as DM sessions), clamped to the run's base difficulty tier.
+        Player* levelRef = ObjectAccessor::FindPlayer(run->LeaderGuid);
+        if (!levelRef)
+            for (const auto& pd : run->Players)
+                if ((levelRef = ObjectAccessor::FindPlayer(pd.PlayerGuid)))
+                    break;
+
+        uint8 effectiveLevel = levelRef
+            ? sDungeonMasterMgr->ComputeEffectiveLevel(levelRef)
+            : 1;
+        if (const DifficultyTier* diffTier = sDMConfig->GetDifficulty(run->BaseDifficultyId))
+            effectiveLevel = diffTier->ClampLevel(effectiveLevel);
 
         std::vector<ObjectGuid> guids;
         for (const auto& pd : run->Players)
@@ -821,11 +826,10 @@ std::string RoguelikeMgr::GetActiveAffixNames(uint32 runId) const
     return result;
 }
 
-// Buff system (+10% all stats per stack via direct stat modification)
-// In 3.3.5 clients, spell tooltips are hardcoded in the DBC and can't be updated
-// Buff system (+10% all stats per stack via BoK aura with visual stack count)
-// SetStackAmount(n) both displays the stack number on the buff icon AND
-// auto-multiplies the base 10% effect by n (so 3 stacks = 30%).
+// Roguelike permanent buff: reuse Greater Blessing of Kings (25898) for the
+// SPELL_AURA_MOD_TOTAL_STAT_PERCENTAGE effect so stack count scales stats on
+// the server via SetStackAmount (DBC StackAmount stays 0 so normal paladin
+// refreshes never climb stacks — see dm_world_script OnStartup).
 
 static constexpr uint32 BUFF_SPELL_ID = 25898;  // Greater Blessing of Kings
 

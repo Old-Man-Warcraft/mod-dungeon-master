@@ -155,6 +155,12 @@ void DMConfig::LoadDifficulties()
             LOG_ERROR("module", "DungeonMaster: Bad difficulty entry #{}", i);
             continue;
         }
+        if (t.MinLevel > t.MaxLevel)
+        {
+            LOG_WARN("module", "DungeonMaster: Difficulty '{}' (#{}) had MinLevel > MaxLevel; swapping.",
+                t.Name, i);
+            std::swap(t.MinLevel, t.MaxLevel);
+        }
         _difficulties.push_back(t);
     }
 

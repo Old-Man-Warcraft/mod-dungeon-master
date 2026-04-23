@@ -1505,7 +1505,8 @@ void DungeonMasterMgr::PopulateDungeon(Session* session, InstanceMap* map)
 
 // Select a creature matching the theme, filtered to the session's level band.
 // bandMin/bandMax come from session->LevelBandMin/Max so trash levels stay
-// close to the players' level. Fallback broadens the band if nothing matches.
+// close to the players' level. The level band is a hard constraint: relax the
+// theme if necessary, but never spawn an out-of-band template.
 uint32 DungeonMasterMgr::SelectCreatureForTheme(const Theme* theme, bool isBoss,
                                                   uint8 bandMin, uint8 bandMax)
 {
@@ -1530,52 +1531,82 @@ uint32 DungeonMasterMgr::SelectCreatureForTheme(const Theme* theme, bool isBoss,
         return e.MinLevel <= bandMax && e.MaxLevel >= bandMin;
     };
 
+    auto strictBandMatch = [&](const CreaturePoolEntry& e) -> bool
+    {
+        return e.MinLevel >= bandMin && e.MaxLevel <= bandMax;
+    };
+
+    uint8 bandWidth = (bandMax >= bandMin) ? (bandMax - bandMin) : 0;
+    uint8 maxSpan = std::max<uint8>(5, std::min<uint8>(10, static_cast<uint8>(bandWidth + 2)));
+
+    auto narrowOverlapMatch = [&](const CreaturePoolEntry& e) -> bool
+    {
+        return levelMatch(e) && (e.MaxLevel - e.MinLevel) <= maxSpan;
+    };
+
     std::vector<uint32> candidates;
 
     auto collect = [&](const std::unordered_map<uint32, std::vector<CreaturePoolEntry>>& pool,
-                       bool requireLevel)
+                       bool requireTheme, auto&& match)
     {
         for (const auto& [type, vec] : pool)
         {
-            if (!typeMatch(type)) continue;
+            if (requireTheme && !typeMatch(type))
+                continue;
+
             for (const auto& e : vec)
-                if (!requireLevel || levelMatch(e))
+                if (match(e))
                     candidates.push_back(e.Entry);
         }
     };
 
     if (isBoss)
     {
-        collect(_bossCreatures, true);
-        if (candidates.empty()) collect(_bossCreatures, false);    // level fallback
-        if (candidates.empty()) collect(_creaturesByType, true);   // promote trash
-        if (candidates.empty()) collect(_creaturesByType, false);  // any level
+        collect(_bossCreatures, true, strictBandMatch);
+        if (candidates.empty() && !anyType)
+            collect(_bossCreatures, false, strictBandMatch);
+
+        if (candidates.empty())
+            collect(_bossCreatures, true, narrowOverlapMatch);
+        if (candidates.empty() && !anyType)
+            collect(_bossCreatures, false, narrowOverlapMatch);
+
+        if (candidates.empty())
+            collect(_creaturesByType, true, strictBandMatch);   // promote trash within band
+        if (candidates.empty() && !anyType)
+            collect(_creaturesByType, false, strictBandMatch);
+
+        if (candidates.empty())
+            collect(_creaturesByType, true, narrowOverlapMatch);
+        if (candidates.empty() && !anyType)
+            collect(_creaturesByType, false, narrowOverlapMatch);
+
+        if (candidates.empty())
+            LOG_WARN("module", "DungeonMaster: No in-band boss candidate for theme '{}' in band {}-{}.",
+                theme->Name, bandMin, bandMax);
     }
     else
     {
-        collect(_creaturesByType, true);
-        if (candidates.empty()) collect(_creaturesByType, false);  // level fallback
-    }
-
-    // Type fallback: any creature type
-    if (candidates.empty() && !anyType)
-    {
-        LOG_WARN("module", "DungeonMaster: No '{}' creatures found — falling back to any type.",
-            theme->Name);
-
-        if (isBoss)
+        collect(_creaturesByType, true, strictBandMatch);
+        if (candidates.empty() && !anyType)
         {
-            for (const auto& [type, vec] : _bossCreatures)
-                for (const auto& e : vec)
-                    candidates.push_back(e.Entry);
+            LOG_WARN("module", "DungeonMaster: No strict in-band '{}' creatures found in band {}-{}; falling back to any type within band.",
+                theme->Name, bandMin, bandMax);
+            collect(_creaturesByType, false, strictBandMatch);
         }
 
         if (candidates.empty())
+            collect(_creaturesByType, true, narrowOverlapMatch);
+        if (candidates.empty() && !anyType)
         {
-            for (const auto& [type, vec] : _creaturesByType)
-                for (const auto& e : vec)
-                    candidates.push_back(e.Entry);
+            LOG_WARN("module", "DungeonMaster: No narrow in-band '{}' creatures found in band {}-{}; falling back to any type within band.",
+                theme->Name, bandMin, bandMax);
+            collect(_creaturesByType, false, narrowOverlapMatch);
         }
+
+        if (candidates.empty())
+            LOG_WARN("module", "DungeonMaster: No in-band trash candidate for theme '{}' in band {}-{}.",
+                theme->Name, bandMin, bandMax);
     }
 
     if (!candidates.empty())
@@ -1613,50 +1644,64 @@ uint32 DungeonMasterMgr::SelectDungeonBoss(const Theme* theme, uint8 bandMin, ui
         return e.MinLevel <= bandMax && e.MaxLevel >= bandMin;
     };
 
+    auto strictBandMatch = [&](const CreaturePoolEntry& e) -> bool
+    {
+        return e.MinLevel >= bandMin && e.MaxLevel <= bandMax;
+    };
+
+    uint8 bandWidth = (bandMax >= bandMin) ? (bandMax - bandMin) : 0;
+    uint8 maxSpan = std::max<uint8>(5, std::min<uint8>(10, static_cast<uint8>(bandWidth + 2)));
+
+    auto narrowOverlapMatch = [&](const CreaturePoolEntry& e) -> bool
+    {
+        return levelMatch(e) && (e.MaxLevel - e.MinLevel) <= maxSpan;
+    };
+
     // Prefer themed dungeon bosses within level band
     std::vector<uint32> candidates;
     for (const auto& [type, vec] : _dungeonBossPool)
     {
         if (!typeMatch(type)) continue;
         for (const auto& e : vec)
-            if (levelMatch(e))
+            if (strictBandMatch(e))
                 candidates.push_back(e.Entry);
     }
 
-    // Level fallback: themed dungeon boss any level
     if (candidates.empty())
     {
         for (const auto& [type, vec] : _dungeonBossPool)
         {
             if (!typeMatch(type)) continue;
             for (const auto& e : vec)
-                candidates.push_back(e.Entry);
+                if (narrowOverlapMatch(e))
+                    candidates.push_back(e.Entry);
         }
     }
 
-    // Type fallback: any dungeon boss within level band
-    if (candidates.empty())
+    // Keep the spawn inside the current band even if we have to relax the theme.
+    if (candidates.empty() && !anyType)
     {
-        LOG_DEBUG("module", "DungeonMaster: No themed dungeon boss for '{}' — using any dungeon boss.",
+        LOG_DEBUG("module", "DungeonMaster: No themed in-band dungeon boss for '{}' — using any in-band dungeon boss.",
             theme->Name);
         for (const auto& [type, vec] : _dungeonBossPool)
             for (const auto& e : vec)
-                if (levelMatch(e))
+                if (strictBandMatch(e))
                     candidates.push_back(e.Entry);
     }
 
-    // Final type fallback: any dungeon boss any level
-    if (candidates.empty())
+    if (candidates.empty() && !anyType)
     {
         for (const auto& [type, vec] : _dungeonBossPool)
             for (const auto& e : vec)
-                candidates.push_back(e.Entry);
+                if (narrowOverlapMatch(e))
+                    candidates.push_back(e.Entry);
     }
 
-    // Last resort: generic boss pool
+    // Last resort: generic in-band boss pool
     if (candidates.empty())
     {
-        LOG_WARN("module", "DungeonMaster: Dungeon boss pool empty — falling back to generic boss selection.");
+        LOG_WARN("module", "DungeonMaster: No in-band dungeon boss for theme '{}' in band {}-{}; falling back to generic in-band boss selection.",
+            theme->Name, bandMin, bandMax);
         return SelectCreatureForTheme(theme, true, bandMin, bandMax);
     }
 
