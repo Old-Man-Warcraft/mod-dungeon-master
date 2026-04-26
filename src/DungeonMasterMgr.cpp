@@ -698,6 +698,23 @@ Session* DungeonMasterMgr::GetSessionByInstance(uint32 instId)
     return nullptr;
 }
 
+bool DungeonMasterMgr::HasActiveSessionForInstance(uint32 instanceId) const
+{
+    if (!instanceId)
+        return false;
+
+    std::lock_guard<std::mutex> lock(_sessionMutex);
+    auto instanceIt = _instanceToSession.find(instanceId);
+    if (instanceIt == _instanceToSession.end())
+        return false;
+
+    auto sessionIt = _activeSessions.find(instanceIt->second);
+    if (sessionIt == _activeSessions.end())
+        return false;
+
+    return sessionIt->second.IsActive();
+}
+
 void DungeonMasterMgr::RegisterSessionInstance(uint32 sessionId, uint32 instanceId)
 {
     if (!instanceId)
@@ -975,27 +992,41 @@ void DungeonMasterMgr::ClearDungeonCreatures(InstanceMap* map)
     // Phase 1: despawn our tracked creatures
     uint32 instanceId = map->GetInstanceId();
     auto guidIt = _instanceCreatureGuids.find(instanceId);
+    std::vector<ObjectGuid> trackedGuids;
     if (guidIt != _instanceCreatureGuids.end())
     {
-        for (const ObjectGuid& guid : guidIt->second)
-        {
-            Creature* c = map->GetCreature(guid);
-            if (c && c->IsInWorld())
-            {
-                c->DespawnOrUnsummon();
-                ++totalRemoved;
-            }
-        }
+        trackedGuids = guidIt->second;
         guidIt->second.clear();
+    }
+
+    for (ObjectGuid const& guid : trackedGuids)
+    {
+        Creature* c = map->GetCreature(guid);
+        if (c && c->IsInWorld())
+        {
+            c->DespawnOrUnsummon();
+            ++totalRemoved;
+        }
     }
 
     uint32 dbRemoved = 0;
 
     // Phase 2: despawn DB-spawned creatures
     auto const& store = map->GetCreatureBySpawnIdStore();
+    std::vector<ObjectGuid> dbCreatureGuids;
+    dbCreatureGuids.reserve(store.size());
+
     for (auto const& pair : store)
     {
         Creature* c = pair.second;
+        if (c && c->IsInWorld() && !c->IsPet() && !c->IsGuardian()
+            && !c->IsTotem() && c->GetEntry() != npcEntry)
+            dbCreatureGuids.push_back(c->GetGUID());
+    }
+
+    for (ObjectGuid const& guid : dbCreatureGuids)
+    {
+        Creature* c = map->GetCreature(guid);
         if (c && c->IsInWorld() && !c->IsPet() && !c->IsGuardian()
             && !c->IsTotem() && c->GetEntry() != npcEntry)
         {
@@ -1014,10 +1045,21 @@ void DungeonMasterMgr::ClearDungeonCreatures(InstanceMap* map)
         if (!p || !p->IsInWorld()) continue;
 
         std::list<Creature*> gridCreatures;
+        std::vector<ObjectGuid> gridCreatureGuids;
         p->GetCreatureListWithEntryInGrid(gridCreatures, 0, 5000.0f);
 
         for (Creature* c : gridCreatures)
         {
+            if (!c || !c->IsInWorld()) continue;
+            if (c->IsPet() || c->IsGuardian() || c->IsTotem()) continue;
+            if (c->GetEntry() == npcEntry) continue;
+
+            gridCreatureGuids.push_back(c->GetGUID());
+        }
+
+        for (ObjectGuid const& guid : gridCreatureGuids)
+        {
+            Creature* c = map->GetCreature(guid);
             if (!c || !c->IsInWorld()) continue;
             if (c->IsPet() || c->IsGuardian() || c->IsTotem()) continue;
             if (c->GetEntry() == npcEntry) continue;
@@ -1040,21 +1082,24 @@ void DungeonMasterMgr::OpenAllDoors(InstanceMap* map)
 {
     if (!map) return;
 
-    std::vector<GameObject*> doors;
+    std::vector<ObjectGuid> doorGuids;
     auto const& store = map->GetGameObjectBySpawnIdStore();
     for (auto const& pair : store)
     {
         GameObject* go = pair.second;
         if (!go || !go->IsInWorld()) continue;
         if (go->GetGoType() == GAMEOBJECT_TYPE_DOOR || go->GetGoType() == GAMEOBJECT_TYPE_BUTTON)
-            doors.push_back(go);
+            doorGuids.push_back(go->GetGUID());
     }
 
-    for (GameObject* go : doors)
+    for (ObjectGuid const& guid : doorGuids)
+    {
+        GameObject* go = map->GetGameObject(guid);
         if (go && go->IsInWorld())
             go->Delete();
+    }
 
-    LOG_DEBUG("module", "DungeonMaster: Removed {} doors from instance.", doors.size());
+    LOG_DEBUG("module", "DungeonMaster: Removed {} doors from instance.", doorGuids.size());
 }
 
 // Populate dungeon with themed creatures and bosses
@@ -3419,9 +3464,24 @@ void DungeonMasterMgr::Update(uint32 diff)
                     {
                         uint32 npcEntry = sDMConfig->GetNpcEntry();
                         auto const& dbStore = static_cast<InstanceMap*>(m)->GetCreatureBySpawnIdStore();
+                        std::vector<ObjectGuid> strayGuids;
+                        strayGuids.reserve(dbStore.size());
+
                         for (auto const& pair : dbStore)
                         {
                             Creature* stray = pair.second;
+                            if (stray && stray->IsInWorld() && stray->IsAlive()
+                                && stray->GetEntry() != npcEntry
+                                && !stray->IsPet() && !stray->IsGuardian() && !stray->IsTotem()
+                                && ourGuids.count(stray->GetGUID()) == 0)
+                            {
+                                strayGuids.push_back(stray->GetGUID());
+                            }
+                        }
+
+                        for (ObjectGuid const& guid : strayGuids)
+                        {
+                            Creature* stray = ObjectAccessor::GetCreature(*ref, guid);
                             if (stray && stray->IsInWorld() && stray->IsAlive()
                                 && stray->GetEntry() != npcEntry
                                 && !stray->IsPet() && !stray->IsGuardian() && !stray->IsTotem()

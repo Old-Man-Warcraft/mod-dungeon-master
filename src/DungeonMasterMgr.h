@@ -36,6 +36,7 @@ public:
     Session*  CreateSession(Player* leader, uint32 difficultyId, uint32 themeId, uint32 mapId, bool scaleToParty = true);
     Session*  GetSession(uint32 sessionId);
     Session*  GetSessionByInstance(uint32 instanceId);
+    bool      HasActiveSessionForInstance(uint32 instanceId) const;
     void      RegisterSessionInstance(uint32 sessionId, uint32 instanceId);
     Session*  GetSessionByPlayer(ObjectGuid playerGuid);
     void      EndSession(uint32 sessionId, bool success);

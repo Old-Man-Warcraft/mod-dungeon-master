@@ -59,22 +59,13 @@ public:
         session->InstanceId = instance->GetInstanceId();
         sDungeonMasterMgr->RegisterSessionInstance(session->SessionId, session->InstanceId);
 
-        ChatHandler(player->GetSession()).SendSysMessage(
-            "|cFF00FF00[Dungeon Master]|r Preparing the challenge...");
-
-        sDungeonMasterMgr->PopulateDungeon(session, instance);
-
-        LOG_INFO("module", "DungeonMaster: Session {} — populated via OnPlayerEnterAll (player {}, map {}, mobs {}, bosses {})",
-            session->SessionId, player->GetName(), map->GetId(),
-            session->TotalMobs, session->TotalBosses);
-
-        char buf[256];
-        snprintf(buf, sizeof(buf),
-            "|cFF00FF00[Dungeon Master]|r |cFFFFFFFF%u|r enemies and |cFFFFFFFF%u|r boss(es) spawned. "
-            "Enemy level: |cFFFFFFFF%u|r (tier band |cFFFFFFFF%u-%u|r). Good luck!",
-            session->TotalMobs, session->TotalBosses,
-            session->EffectiveLevel, session->LevelBandMin, session->LevelBandMax);
-        ChatHandler(player->GetSession()).SendSysMessage(buf);
+        // Do not populate here while the party is still teleporting into the instance.
+        // ClearDungeonCreatures() performs a player-grid sweep, and running it from the
+        // enter hook can race against the live player list during map-enter churn.
+        // DungeonMasterMgr::Update() already has a deferred populate path once the map
+        // has stabilized and at least one session player is safely present in-instance.
+        LOG_INFO("module", "DungeonMaster: Session {} — population deferred from OnPlayerEnterAll (player {}, map {}, inst {})",
+            session->SessionId, player->GetName(), map->GetId(), session->InstanceId);
     }
 };
 
