@@ -12,6 +12,19 @@
 # CORE SETTINGS
 ###############################################################################
 
+# Dedicated logger for this module.
+#
+# Appender format: Type,LogLevel,Flags,File,Mode
+#   Type 2 = file
+#   LogLevel 5 = allow up to DEBUG in the file appender
+#   Flags 7 = timestamp + level + logger name
+#   Mode a = append
+#
+# Increase Logger.module.DungeonMaster to 5 for DEBUG or 6 for TRACE while
+# investigating dungeon population / map lifecycle issues.
+Appender.DungeonMaster = 2,5,7,DungeonMaster.log,a
+Logger.module.DungeonMaster = 4,DungeonMaster
+
 #    DungeonMaster.Enable
 #        Default: 1
 DungeonMaster.Enable = 1

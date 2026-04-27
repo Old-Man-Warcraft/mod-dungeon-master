@@ -14,6 +14,11 @@
 
 using namespace DungeonMaster;
 
+namespace
+{
+constexpr char const* DM_LOG_CATEGORY = "module.DungeonMaster";
+}
+
 class dm_allmap_script : public AllMapScript
 {
 public:
@@ -31,12 +36,12 @@ public:
         Session* session = sDungeonMasterMgr->GetSessionByPlayer(player->GetGUID());
         if (!session)
         {
-            LOG_DEBUG("module", "DungeonMaster: OnPlayerEnterAll — {} entered map {} but has no session",
+            LOG_DEBUG(DM_LOG_CATEGORY, "DungeonMaster: OnPlayerEnterAll — {} entered map {} but has no session",
                 player->GetName(), map->GetId());
             return;
         }
 
-        LOG_INFO("module", "DungeonMaster: OnPlayerEnterAll — {} entered map {} (session {} state {} mapId {} mobs {} bosses {})",
+        LOG_INFO(DM_LOG_CATEGORY, "DungeonMaster: OnPlayerEnterAll — {} entered map {} (session {} state {} mapId {} mobs {} bosses {})",
             player->GetName(), map->GetId(), session->SessionId,
             static_cast<int>(session->State), session->MapId,
             session->TotalMobs, session->TotalBosses);
@@ -64,7 +69,7 @@ public:
         // enter hook can race against the live player list during map-enter churn.
         // DungeonMasterMgr::Update() already has a deferred populate path once the map
         // has stabilized and at least one session player is safely present in-instance.
-        LOG_INFO("module", "DungeonMaster: Session {} — population deferred from OnPlayerEnterAll (player {}, map {}, inst {})",
+        LOG_INFO(DM_LOG_CATEGORY, "DungeonMaster: Session {} — population deferred from OnPlayerEnterAll (player {}, map {}, inst {})",
             session->SessionId, player->GetName(), map->GetId(), session->InstanceId);
     }
 };

@@ -11,6 +11,11 @@
 
 using namespace DungeonMaster;
 
+namespace
+{
+constexpr char const* DM_LOG_CATEGORY = "module.DungeonMaster";
+}
+
 class dm_world_script : public WorldScript
 {
 public:
@@ -25,7 +30,7 @@ public:
     {
         if (!sDMConfig->IsEnabled())
         {
-            LOG_INFO("module", "DungeonMaster: Disabled in configuration.");
+            LOG_INFO(DM_LOG_CATEGORY, "DungeonMaster: Disabled in configuration.");
             return;
         }
 
@@ -38,21 +43,21 @@ public:
         sDungeonMasterMgr->Initialize();
         sRoguelikeMgr->Initialize();
 
-        LOG_INFO("module", "===============================================");
-        LOG_INFO("module", " Dungeon Master Module — Ready");
-        LOG_INFO("module", " {} difficulties | {} themes | {} dungeons",
+        LOG_INFO(DM_LOG_CATEGORY, "===============================================");
+        LOG_INFO(DM_LOG_CATEGORY, " Dungeon Master Module — Ready");
+        LOG_INFO(DM_LOG_CATEGORY, " {} difficulties | {} themes | {} dungeons",
             sDMConfig->GetDifficulties().size(),
             sDMConfig->GetThemes().size(),
             sDMConfig->GetDungeons().size());
-        LOG_INFO("module", " Level band: +/-{} | Max concurrent: {}",
+        LOG_INFO(DM_LOG_CATEGORY, " Level band: +/-{} | Max concurrent: {}",
             sDMConfig->GetLevelBand(), sDMConfig->GetMaxConcurrentRuns());
-        LOG_INFO("module", "===============================================");
+        LOG_INFO(DM_LOG_CATEGORY, "===============================================");
     }
 
     void OnShutdown() override
     {
         if (!sDMConfig->IsEnabled()) return;
-        LOG_INFO("module", "DungeonMaster: Shutdown — {} sessions active.",
+        LOG_INFO(DM_LOG_CATEGORY, "DungeonMaster: Shutdown — {} sessions active.",
             sDungeonMasterMgr->GetActiveSessionCount());
     }
 

@@ -149,6 +149,7 @@ struct Session
     uint32  TotalBosses = 0;
     uint32  BossesKilled = 0;
     uint32  Wipes       = 0;
+    bool    PopulationPending = false;
 
     Position EntrancePos;
 

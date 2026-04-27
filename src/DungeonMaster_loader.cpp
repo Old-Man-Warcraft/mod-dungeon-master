@@ -4,6 +4,11 @@
 #include "ScriptMgr.h"
 #include "Log.h"
 
+namespace
+{
+constexpr char const* DM_LOG_CATEGORY = "module.DungeonMaster";
+}
+
 void AddSC_npc_dungeon_master();
 void AddSC_dm_player_script();
 void AddSC_dm_world_script();
@@ -13,7 +18,7 @@ void AddSC_dm_unit_script();
 
 void Addmod_dungeon_masterScripts()
 {
-    LOG_INFO("module", "DungeonMaster: Registering scripts...");
+    LOG_INFO(DM_LOG_CATEGORY, "DungeonMaster: Registering scripts...");
 
     AddSC_npc_dungeon_master();
     AddSC_dm_player_script();

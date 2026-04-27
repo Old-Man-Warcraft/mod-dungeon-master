@@ -24,6 +24,11 @@
 namespace DungeonMaster
 {
 
+namespace
+{
+constexpr char const* DM_LOG_CATEGORY = "module.DungeonMaster";
+}
+
 // RNG helpers (thread-local for safety)
 static thread_local std::mt19937 tRng{ std::random_device{}() };
 
@@ -48,7 +53,7 @@ void RoguelikeMgr::Initialize()
 {
     BuildAffixPool();
     LoadAllRoguelikePlayerStats();
-    LOG_INFO("module", "RoguelikeMgr: Initialized — {} affix definitions, {} buff pool entries.",
+    LOG_INFO(DM_LOG_CATEGORY, "RoguelikeMgr: Initialized — {} affix definitions, {} buff pool entries.",
         _affixDefs.size(), sDMConfig->GetRoguelikeBuffPool().size());
 }
 
@@ -308,7 +313,7 @@ bool RoguelikeMgr::StartRun(Player* leader, uint32 difficultyId, uint32 themeId,
         }
     }
 
-    LOG_INFO("module", "RoguelikeMgr: Run {} started — leader {}, party {}, theme {}, map {}",
+    LOG_INFO(DM_LOG_CATEGORY, "RoguelikeMgr: Run {} started — leader {}, party {}, theme {}, map {}",
         run.RunId, leader->GetName(), run.Players.size(),
         theme ? theme->Name.c_str() : "Random", mapId);
 
@@ -328,7 +333,7 @@ void RoguelikeMgr::OnDungeonCompleted(uint32 runId, uint32 sessionId)
 
     if (run->CurrentSessionId != sessionId)
     {
-        LOG_WARN("module", "RoguelikeMgr: OnDungeonCompleted — session {} != current {}",
+        LOG_WARN(DM_LOG_CATEGORY, "RoguelikeMgr: OnDungeonCompleted — session {} != current {}",
             sessionId, run->CurrentSessionId);
         return;
     }
@@ -518,7 +523,7 @@ void RoguelikeMgr::OnPartyWipe(uint32 runId)
     }
 
 
-    LOG_INFO("module", "RoguelikeMgr: Run {} ended (wipe) — tier {}, {} floors cleared.",
+    LOG_INFO(DM_LOG_CATEGORY, "RoguelikeMgr: Run {} ended (wipe) — tier {}, {} floors cleared.",
         runId, savedTier, savedCleared);
 }
 
@@ -624,7 +629,7 @@ void RoguelikeMgr::EndRun(uint32 runId, bool announceResults)
     }
 
 
-    LOG_INFO("module", "RoguelikeMgr: Run {} ended (graceful) — tier {}, {} floors.",
+    LOG_INFO(DM_LOG_CATEGORY, "RoguelikeMgr: Run {} ended (graceful) — tier {}, {} floors.",
         runId, savedTier, savedCleared);
 }
 
@@ -964,7 +969,7 @@ bool RoguelikeMgr::TransitionToNextDungeon(RoguelikeRun& run)
     uint32 mapId = SelectRandomDungeon(run);
     if (!mapId)
     {
-        LOG_WARN("module", "RoguelikeMgr: No dungeon available for run {} tier {}",
+        LOG_WARN(DM_LOG_CATEGORY, "RoguelikeMgr: No dungeon available for run {} tier {}",
             run.RunId, run.CurrentTier);
         return false;
     }
@@ -982,7 +987,7 @@ bool RoguelikeMgr::TransitionToNextDungeon(RoguelikeRun& run)
 
     if (!leader)
     {
-        LOG_WARN("module", "RoguelikeMgr: No online leader for run {}", run.RunId);
+        LOG_WARN(DM_LOG_CATEGORY, "RoguelikeMgr: No online leader for run {}", run.RunId);
         return false;
     }
 
@@ -1004,7 +1009,7 @@ bool RoguelikeMgr::TransitionToNextDungeon(RoguelikeRun& run)
         leader, run.BaseDifficultyId, themeId, mapId, run.ScaleToParty);
     if (!session)
     {
-        LOG_ERROR("module", "RoguelikeMgr: Failed to create session for run {} tier {}",
+        LOG_ERROR(DM_LOG_CATEGORY, "RoguelikeMgr: Failed to create session for run {} tier {}",
             run.RunId, run.CurrentTier);
         return false;
     }
@@ -1022,7 +1027,7 @@ bool RoguelikeMgr::TransitionToNextDungeon(RoguelikeRun& run)
     // Start and teleport
     if (!sDungeonMasterMgr->StartDungeon(session))
     {
-        LOG_ERROR("module", "RoguelikeMgr: StartDungeon failed for run {}", run.RunId);
+        LOG_ERROR(DM_LOG_CATEGORY, "RoguelikeMgr: StartDungeon failed for run {}", run.RunId);
         sDungeonMasterMgr->CleanupRoguelikeSession(session->SessionId, false);
         {
             std::lock_guard<std::mutex> lock2(_runMutex);
@@ -1033,7 +1038,7 @@ bool RoguelikeMgr::TransitionToNextDungeon(RoguelikeRun& run)
 
     if (!sDungeonMasterMgr->TeleportPartyIn(session))
     {
-        LOG_ERROR("module", "RoguelikeMgr: Teleport failed for run {}", run.RunId);
+        LOG_ERROR(DM_LOG_CATEGORY, "RoguelikeMgr: Teleport failed for run {}", run.RunId);
         sDungeonMasterMgr->CleanupRoguelikeSession(session->SessionId, false);
         {
             std::lock_guard<std::mutex> lock2(_runMutex);
@@ -1051,7 +1056,7 @@ bool RoguelikeMgr::TransitionToNextDungeon(RoguelikeRun& run)
         dg ? dg->Name.c_str() : "Unknown", run.CurrentTier);
     AnnounceToRun(run, buf);
 
-    LOG_INFO("module", "RoguelikeMgr: Run {} transitioned to tier {} — map {} ({})",
+    LOG_INFO(DM_LOG_CATEGORY, "RoguelikeMgr: Run {} transitioned to tier {} — map {} ({})",
         run.RunId, run.CurrentTier, mapId,
         dg ? dg->Name.c_str() : "?");
 
@@ -1159,7 +1164,7 @@ void RoguelikeMgr::Update(uint32 diff)
 
     for (uint32 rid : toAbandon)
     {
-        LOG_INFO("module", "RoguelikeMgr: Run {} — all players offline, abandoning.", rid);
+        LOG_INFO(DM_LOG_CATEGORY, "RoguelikeMgr: Run {} — all players offline, abandoning.", rid);
         EndRun(rid, false);
     }
 }
@@ -1264,7 +1269,7 @@ void RoguelikeMgr::LoadAllRoguelikePlayerStats()
 
     if (!result)
     {
-        LOG_INFO("module", "RoguelikeMgr: No roguelike player stats found.");
+        LOG_INFO(DM_LOG_CATEGORY, "RoguelikeMgr: No roguelike player stats found.");
         return;
     }
 
@@ -1288,7 +1293,7 @@ void RoguelikeMgr::LoadAllRoguelikePlayerStats()
         ++count;
     } while (result->NextRow());
 
-    LOG_INFO("module", "RoguelikeMgr: Loaded roguelike stats for {} players.", count);
+    LOG_INFO(DM_LOG_CATEGORY, "RoguelikeMgr: Loaded roguelike stats for {} players.", count);
 }
 
 RoguelikePlayerStats RoguelikeMgr::GetRoguelikePlayerStats(ObjectGuid guid) const

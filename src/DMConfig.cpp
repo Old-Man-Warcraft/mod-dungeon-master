@@ -11,6 +11,11 @@
 namespace DungeonMaster
 {
 
+namespace
+{
+constexpr char const* DM_LOG_CATEGORY = "module.DungeonMaster";
+}
+
 
 static std::vector<std::string> SplitString(const std::string& str, char delim)
 {
@@ -49,7 +54,7 @@ DMConfig* DMConfig::Instance()
 void DMConfig::LoadConfig(bool reload)
 {
     if (reload)
-        LOG_INFO("module", "DungeonMaster: Reloading configuration...");
+        LOG_INFO(DM_LOG_CATEGORY, "DungeonMaster: Reloading configuration...");
 
     _enabled  = sConfigMgr->GetOption<bool>  ("DungeonMaster.Enable", true);
     _debug    = sConfigMgr->GetOption<bool>  ("DungeonMaster.Debug",  false);
@@ -122,7 +127,7 @@ void DMConfig::LoadConfig(bool reload)
     LoadDungeons();
     LoadRoguelikeBuffPool();
 
-    LOG_INFO("module", "DungeonMaster: Config loaded — {} difficulties, {} themes, {} dungeons, {} roguelike buffs.",
+    LOG_INFO(DM_LOG_CATEGORY, "DungeonMaster: Config loaded — {} difficulties, {} themes, {} dungeons, {} roguelike buffs.",
         _difficulties.size(), _themes.size(), _dungeons.size(), _roguelikeBuffPool.size());
 }
 
@@ -152,12 +157,12 @@ void DMConfig::LoadDifficulties()
             t.RewardMultiplier = std::stof(parts[5]);
             t.MobCountMultiplier = std::stof(parts[6]);
         } catch (...) {
-            LOG_ERROR("module", "DungeonMaster: Bad difficulty entry #{}", i);
+            LOG_ERROR(DM_LOG_CATEGORY, "DungeonMaster: Bad difficulty entry #{}", i);
             continue;
         }
         if (t.MinLevel > t.MaxLevel)
         {
-            LOG_WARN("module", "DungeonMaster: Difficulty '{}' (#{}) had MinLevel > MaxLevel; swapping.",
+            LOG_WARN(DM_LOG_CATEGORY, "DungeonMaster: Difficulty '{}' (#{}) had MinLevel > MaxLevel; swapping.",
                 t.Name, i);
             std::swap(t.MinLevel, t.MaxLevel);
         }
@@ -169,7 +174,7 @@ void DMConfig::LoadDifficulties()
         DifficultyTier def;
         def.Id = 1; def.Name = "Normal";
         _difficulties.push_back(def);
-        LOG_WARN("module", "DungeonMaster: No difficulties configured, using default.");
+        LOG_WARN(DM_LOG_CATEGORY, "DungeonMaster: No difficulties configured, using default.");
     }
 }
 
@@ -207,7 +212,7 @@ void DMConfig::LoadThemes()
         Theme def;
         def.Id = 1; def.Name = "Random"; def.CreatureTypes.push_back(uint32(-1));
         _themes.push_back(def);
-        LOG_WARN("module", "DungeonMaster: No themes configured, using Random.");
+        LOG_WARN(DM_LOG_CATEGORY, "DungeonMaster: No themes configured, using Random.");
     }
 }
 
@@ -380,7 +385,7 @@ void DMConfig::LoadRoguelikeBuffPool()
             b.Name    = parts[1];
             b.Weight  = static_cast<uint32>(std::stoul(parts[2]));
         } catch (...) {
-            LOG_ERROR("module", "DungeonMaster: Bad roguelike buff entry #{}", i);
+            LOG_ERROR(DM_LOG_CATEGORY, "DungeonMaster: Bad roguelike buff entry #{}", i);
             continue;
         }
         _roguelikeBuffPool.push_back(b);
@@ -389,7 +394,7 @@ void DMConfig::LoadRoguelikeBuffPool()
     // Default pool if none configured
     if (_roguelikeBuffPool.empty())
     {
-        LOG_INFO("module", "DungeonMaster: No roguelike buffs configured — using defaults.");
+        LOG_INFO(DM_LOG_CATEGORY, "DungeonMaster: No roguelike buffs configured — using defaults.");
 
         // World buffs (Classic — stack with everything, universally applicable)
         _roguelikeBuffPool.push_back({1, 15366, "Songflower Serenade",   100});  // +15 stats, +5% crit

@@ -23,6 +23,11 @@
 
 using namespace DungeonMaster;
 
+namespace
+{
+constexpr char const* DM_LOG_CATEGORY = "module.DungeonMaster";
+}
+
 // Gossip action IDs (encoded so ranges never overlap)
 enum DMGossipActions
 {
@@ -87,7 +92,7 @@ public:
         }
         if (sDungeonMasterMgr->GetSessionByPlayer(player->GetGUID()))
         {
-            LOG_INFO("module", "DungeonMaster: NPC blocked {} — still in active session",
+            LOG_INFO(DM_LOG_CATEGORY, "DungeonMaster: NPC blocked {} — still in active session",
                 player->GetName());
             ChatHandler(player->GetSession()).SendSysMessage(
                 "|cFFFF0000[Dungeon Master]|r You are already in an active challenge!");
@@ -128,7 +133,7 @@ public:
         if (sDungeonMasterMgr->IsOnCooldown(player->GetGUID()))
         {
             uint32 rem  = sDungeonMasterMgr->GetRemainingCooldown(player->GetGUID());
-            LOG_INFO("module", "DungeonMaster: NPC blocked {} — cooldown {}s remaining",
+            LOG_INFO(DM_LOG_CATEGORY, "DungeonMaster: NPC blocked {} — cooldown {}s remaining",
                 player->GetName(), rem);
             char buf[256];
             snprintf(buf, sizeof(buf),
