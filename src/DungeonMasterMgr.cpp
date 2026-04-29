@@ -1302,30 +1302,26 @@ uint32 DungeonMasterMgr::CalculateTrashSpawnBudget(Session const& session, size_
     const DifficultyTier* difficulty = sDMConfig->GetDifficulty(session.DifficultyId);
     float mobCountMultiplier = difficulty ? difficulty->MobCountMultiplier : 1.0f;
     mobCountMultiplier = std::max(0.25f, mobCountMultiplier);
+    float globalBudgetMultiplier = std::max(0.10f, sDMConfig->GetTrashBudgetGlobalMultiplier());
 
     if (availableTrashPoints <= 12)
         return static_cast<uint32>(availableTrashPoints);
 
-    float normalizedBase = 12.0f + (std::sqrt(static_cast<float>(availableTrashPoints)) * 2.35f);
-    float partyPressure = (session.Players.size() > 1)
-        ? static_cast<float>(session.Players.size() - 1) * 2.5f
-        : 0.0f;
-    float roguelikePressure = session.RoguelikeRunId != 0 ? 5.0f : 0.0f;
+    float normalizedBase = (sDMConfig->GetTrashBudgetBase()
+        + (std::sqrt(static_cast<float>(availableTrashPoints)) * sDMConfig->GetTrashBudgetSqrtScale())
+        + ((session.Players.size() > 1)
+            ? static_cast<float>(session.Players.size() - 1) * sDMConfig->GetTrashBudgetPerExtraPlayer()
+            : 0.0f)
+        + (session.RoguelikeRunId != 0 ? sDMConfig->GetTrashBudgetRoguelikeBonus() : 0.0f))
+        * globalBudgetMultiplier;
 
-    uint32 budget = static_cast<uint32>(std::lround((normalizedBase + partyPressure + roguelikePressure) * mobCountMultiplier));
+    uint32 budget = static_cast<uint32>(std::lround(normalizedBase * mobCountMultiplier));
 
-    uint32 minBudgetFloor = 14u;
-    if (availableTrashPoints >= 70)
-        minBudgetFloor = 18u;
-    if (availableTrashPoints >= 120)
-        minBudgetFloor = 22u;
-    if (availableTrashPoints >= 180)
-        minBudgetFloor = 26u;
-    if (availableTrashPoints >= 280)
-        minBudgetFloor = 32u;
-
-    uint32 minBudget = std::min<uint32>(static_cast<uint32>(availableTrashPoints), minBudgetFloor);
-    uint32 maxBudget = std::min<uint32>(static_cast<uint32>(availableTrashPoints), 110u);
+    uint32 staticMinBudget = sDMConfig->GetTrashBudgetMinSpawns();
+    uint32 percentMinBudget = static_cast<uint32>(std::ceil(
+        static_cast<float>(availableTrashPoints) * std::max(0.0f, sDMConfig->GetTrashBudgetMinPercent())));
+    uint32 minBudget = std::min<uint32>(static_cast<uint32>(availableTrashPoints), std::max(staticMinBudget, percentMinBudget));
+    uint32 maxBudget = std::min<uint32>(static_cast<uint32>(availableTrashPoints), std::max(sDMConfig->GetTrashBudgetMaxSpawns(), minBudget));
 
     if (maxBudget < minBudget)
         maxBudget = minBudget;

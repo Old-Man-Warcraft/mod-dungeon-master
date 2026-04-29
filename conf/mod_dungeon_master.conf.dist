@@ -164,6 +164,50 @@ DungeonMaster.Dungeon.AggroRadius = 15.0
 #        Default: 5
 DungeonMaster.Dungeon.RareSpawnChance = 5
 
+#    DungeonMaster.Dungeon.TrashBudgetBase
+#        Base value used by the normalized trash-spawn budgeter before
+#        difficulty MobMult is applied.
+#        Default: 12.0
+DungeonMaster.Dungeon.TrashBudgetBase = 12.0
+
+#    DungeonMaster.Dungeon.TrashBudgetSqrtScale
+#        Multiplier applied to sqrt(native_trash_spawn_count).
+#        Higher values make large dungeons noticeably denser.
+#        Default: 2.35
+DungeonMaster.Dungeon.TrashBudgetSqrtScale = 2.35
+
+#    DungeonMaster.Dungeon.TrashBudgetPerExtraPlayer
+#        Additional trash-budget pressure per extra party member.
+#        Default: 2.5
+DungeonMaster.Dungeon.TrashBudgetPerExtraPlayer = 2.5
+
+#    DungeonMaster.Dungeon.TrashBudgetRoguelikeBonus
+#        Flat trash-budget bonus for roguelike floors.
+#        Default: 5.0
+DungeonMaster.Dungeon.TrashBudgetRoguelikeBonus = 5.0
+
+#    DungeonMaster.Dungeon.TrashBudgetGlobalMultiplier
+#        Global density scalar applied before difficulty MobMult.
+#        Raise this to make all runs denser without reworking tier configs.
+#        Default: 1.0
+DungeonMaster.Dungeon.TrashBudgetGlobalMultiplier = 1.0
+
+#    DungeonMaster.Dungeon.TrashBudgetMinSpawns
+#        Minimum trash spawns to keep in any dungeon after normalization.
+#        Default: 14
+DungeonMaster.Dungeon.TrashBudgetMinSpawns = 14
+
+#    DungeonMaster.Dungeon.TrashBudgetMinPercent
+#        Minimum trash density as a percent of native trash spawn points.
+#        Useful for keeping large dungeons from feeling empty.
+#        Default: 0.12
+DungeonMaster.Dungeon.TrashBudgetMinPercent = 0.12
+
+#    DungeonMaster.Dungeon.TrashBudgetMaxSpawns
+#        Hard cap on normalized trash spawns before boss positions.
+#        Default: 110
+DungeonMaster.Dungeon.TrashBudgetMaxSpawns = 110
+
 #    DungeonMaster.Scaling.RareHealthMult
 #        Health multiplier for rare spawns (between elite and boss).
 #        Default: 4.0

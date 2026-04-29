@@ -67,15 +67,66 @@ local function safe_len(tbl)
     if type(tbl) ~= "table" then
         return 0
     end
-    return #tbl
+    local count = 0
+    for _, value in pairs(tbl) do
+        if value ~= nil then
+            count = count + 1
+        end
+    end
+    return count
+end
+
+local function normalizeRows(rows, sortKey)
+    if type(rows) ~= "table" then
+        return {}
+    end
+
+    local out = {}
+    for key, value in pairs(rows) do
+        if type(value) == "table" then
+            local numericKey = tonumber(key)
+            out[#out + 1] = {
+                __numericKey = numericKey,
+                __value = value,
+            }
+        end
+    end
+
+    table.sort(out, function(a, b)
+        local av = a.__value
+        local bv = b.__value
+
+        if sortKey then
+            local aSort = tonumber(av[sortKey])
+            local bSort = tonumber(bv[sortKey])
+            if aSort and bSort and aSort ~= bSort then
+                return aSort < bSort
+            end
+        end
+
+        if a.__numericKey and b.__numericKey and a.__numericKey ~= b.__numericKey then
+            return a.__numericKey < b.__numericKey
+        end
+
+        return tostring(av.name or av.charName or "") < tostring(bv.name or bv.charName or "")
+    end)
+
+    local normalized = {}
+    for i = 1, #out do
+        normalized[i] = out[i].__value
+    end
+
+    return normalized
 end
 
 local function findById(rows, id, key)
+    rows = normalizeRows(rows, key)
     rows = rows or {}
     key = key or "id"
     id = tonumber(id) or 0
     for i = 1, #rows do
-        if tonumber(rows[i][key]) == id then
+        local row = rows[i]
+        if row and tonumber(row[key]) == id then
             return rows[i], i
         end
     end
@@ -89,8 +140,9 @@ local function dungeonChoices()
 
     local bootstrap = state.bootstrap
     if bootstrap and bootstrap.dungeons then
-        for i = 1, #bootstrap.dungeons do
-            choices[#choices + 1] = bootstrap.dungeons[i]
+        local dungeons = normalizeRows(bootstrap.dungeons, "mapId")
+        for i = 1, #dungeons do
+            choices[#choices + 1] = dungeons[i]
         end
     end
     return choices
@@ -98,7 +150,7 @@ end
 
 local function cycleChoice(rows, currentId, key, dir, defaultId)
     key = key or "id"
-    rows = rows or {}
+    rows = normalizeRows(rows, key)
     if #rows == 0 then
         return defaultId or 0
     end
@@ -258,7 +310,7 @@ npcHint:SetWidth(300)
 npcHint:SetJustifyH("LEFT")
 npcHint:SetText("Final launch still uses the Dungeon Master NPC. This AIO layer is your planning, stats, and leaderboard cockpit.")
 
-local scroll = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
+local scroll = CreateFrame("ScrollFrame", "DungeonMasterAIOFrameScroll", frame, "UIPanelScrollFrameTemplate")
 scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 22, -226)
 scroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -36, 42)
 
@@ -638,8 +690,15 @@ end)
 
 launchBtn:SetScript("OnClick", function()
     local command = buildLaunchCommand()
-    status:SetText("Sending Dungeon Master launch request…")
-    SendChatMessage(command, "SAY")
+    status:SetText("Prepared Dungeon Master launch command. Press Enter while near the NPC.")
+
+    if ChatFrame_OpenChat then
+        ChatFrame_OpenChat(command)
+    elseif DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.editBox then
+        DEFAULT_CHAT_FRAME.editBox:SetText(command)
+        DEFAULT_CHAT_FRAME.editBox:Show()
+        DEFAULT_CHAT_FRAME.editBox:SetFocus()
+    end
 end)
 
 tabOverview:SetScript("OnClick", function()
@@ -665,6 +724,9 @@ end)
 AIO.AddHandlers(CHANNEL, {
     PushBootstrap = function(payload)
         state.bootstrap = payload or {}
+        state.bootstrap.difficulties = normalizeRows(state.bootstrap.difficulties, "id")
+        state.bootstrap.themes = normalizeRows(state.bootstrap.themes, "id")
+        state.bootstrap.dungeons = normalizeRows(state.bootstrap.dungeons, "mapId")
         if state.selectedDifficultyId == 0 and safe_len(state.bootstrap.difficulties) > 0 then
             state.selectedDifficultyId = tonumber(state.bootstrap.difficulties[1].id) or 1
         end
@@ -691,12 +753,12 @@ AIO.AddHandlers(CHANNEL, {
     end,
 
     PushNormalBoard = function(rows)
-        state.normalBoardRows = rows or {}
+        state.normalBoardRows = normalizeRows(rows, nil)
         renderNormalBoard()
     end,
 
     PushRoguelikeBoard = function(rows)
-        state.roguelikeBoardRows = rows or {}
+        state.roguelikeBoardRows = normalizeRows(rows, nil)
         renderRoguelikeBoard()
     end,
 })

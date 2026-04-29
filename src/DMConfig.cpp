@@ -86,6 +86,14 @@ void DMConfig::LoadConfig(bool reload)
     _rareSpawnChance = sConfigMgr->GetOption<uint32>("DungeonMaster.Dungeon.RareSpawnChance", 5);
     _rareHealthMult  = sConfigMgr->GetOption<float> ("DungeonMaster.Scaling.RareHealthMult",  4.0f);
     _rareDamageMult  = sConfigMgr->GetOption<float> ("DungeonMaster.Scaling.RareDamageMult",  2.0f);
+    _trashBudgetBase = sConfigMgr->GetOption<float> ("DungeonMaster.Dungeon.TrashBudgetBase", 12.0f);
+    _trashBudgetSqrtScale = sConfigMgr->GetOption<float> ("DungeonMaster.Dungeon.TrashBudgetSqrtScale", 2.35f);
+    _trashBudgetPerExtraPlayer = sConfigMgr->GetOption<float> ("DungeonMaster.Dungeon.TrashBudgetPerExtraPlayer", 2.5f);
+    _trashBudgetRoguelikeBonus = sConfigMgr->GetOption<float> ("DungeonMaster.Dungeon.TrashBudgetRoguelikeBonus", 5.0f);
+    _trashBudgetGlobalMultiplier = sConfigMgr->GetOption<float> ("DungeonMaster.Dungeon.TrashBudgetGlobalMultiplier", 1.0f);
+    _trashBudgetMinSpawns = sConfigMgr->GetOption<uint32>("DungeonMaster.Dungeon.TrashBudgetMinSpawns", 14);
+    _trashBudgetMinPercent = sConfigMgr->GetOption<float> ("DungeonMaster.Dungeon.TrashBudgetMinPercent", 0.12f);
+    _trashBudgetMaxSpawns = sConfigMgr->GetOption<uint32>("DungeonMaster.Dungeon.TrashBudgetMaxSpawns", 110);
 
     // Timers
     _cooldownMinutes   = sConfigMgr->GetOption<uint32>("DungeonMaster.Cooldown.Minutes",     5);

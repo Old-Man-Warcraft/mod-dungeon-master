@@ -72,6 +72,14 @@ public:
     uint32 GetRareSpawnChance() const { return _rareSpawnChance; }
     float  GetRareHealthMult()  const { return _rareHealthMult; }
     float  GetRareDamageMult()  const { return _rareDamageMult; }
+    float  GetTrashBudgetBase() const { return _trashBudgetBase; }
+    float  GetTrashBudgetSqrtScale() const { return _trashBudgetSqrtScale; }
+    float  GetTrashBudgetPerExtraPlayer() const { return _trashBudgetPerExtraPlayer; }
+    float  GetTrashBudgetRoguelikeBonus() const { return _trashBudgetRoguelikeBonus; }
+    float  GetTrashBudgetGlobalMultiplier() const { return _trashBudgetGlobalMultiplier; }
+    uint32 GetTrashBudgetMinSpawns() const { return _trashBudgetMinSpawns; }
+    float  GetTrashBudgetMinPercent() const { return _trashBudgetMinPercent; }
+    uint32 GetTrashBudgetMaxSpawns() const { return _trashBudgetMaxSpawns; }
 
     // --- Timers ---
     uint32 GetCooldownMinutes()   const { return _cooldownMinutes; }
@@ -147,6 +155,14 @@ private:
     uint32 _rareSpawnChance = 5;
     float  _rareHealthMult  = 4.0f;
     float  _rareDamageMult  = 2.0f;
+    float  _trashBudgetBase = 12.0f;
+    float  _trashBudgetSqrtScale = 2.35f;
+    float  _trashBudgetPerExtraPlayer = 2.5f;
+    float  _trashBudgetRoguelikeBonus = 5.0f;
+    float  _trashBudgetGlobalMultiplier = 1.0f;
+    uint32 _trashBudgetMinSpawns = 14;
+    float  _trashBudgetMinPercent = 0.12f;
+    uint32 _trashBudgetMaxSpawns = 110;
 
     // Timers
     uint32 _cooldownMinutes   = 5;
