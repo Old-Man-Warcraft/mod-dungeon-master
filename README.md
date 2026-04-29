@@ -2,7 +2,7 @@
 
 A procedural dungeon challenge system for **AzerothCore** (WotLK 3.3.5a).
 
-Players talk to a Dungeon Master NPC, pick a difficulty, creature theme, and dungeon — then get teleported into a cleared instance repopulated with level-scaled themed enemies and a boss. Kill everything to earn rewards. Roguelike mode chains dungeons together with escalating difficulty, affixes, and stacking stat buffs until the party wipes.
+Players talk to a Dungeon Master NPC, pick a difficulty, creature theme, and dungeon — then get teleported into a cleared instance repopulated with level-scaled themed enemies and a boss. Kill everything to earn rewards. Roguelike mode chains dungeons together with escalating difficulty, affixes, and stacking stat buffs until the party wipes. A new optional AIO companion window now provides a richer planning, stats, and leaderboard UI, while the NPC gossip flow remains the supported fallback and current launch path.
 
 > ⚠️ **Early development** — expect bugs and rough edges. Bug reports welcome via Issues.
 
@@ -11,12 +11,13 @@ Players talk to a Dungeon Master NPC, pick a difficulty, creature theme, and dun
 ## Features
 
 ### Core System
-- **37 dungeons** — Classic, TBC, and WotLK 5-man instances
+
+- **45 dungeons** — Classic, TBC, and WotLK 5-man instances
 - **9 creature themes** — Beast Hunt, Dragon's Lair, Demonic Invasion, Elemental Chaos, Giant's Keep, Undead Rising, Humanoid Stronghold, Mechanical Mayhem, Random Chaos
 - **6 difficulty tiers** — Novice through Grandmaster with tuned HP/damage/reward multipliers
 - **Level scaling** — Scale creatures to your party's level or use the tier's natural range
 - **Any dungeon, any level** — A level 80 can run Deadmines scaled to 80, or at its original difficulty
-- **Real dungeon bosses** — Final bosses are pulled from a global pool of all dungeon bosses across Classic, TBC, and WotLK instances, matched to the session's theme.
+- **Hybrid boss selection** — Final bosses now prefer native bosses from the chosen map before relaxing to a global dungeon-boss pool, improving completion reliability and map identity.
 - **Party support** — Solo or groups up to 5
 - **Group Loot support** — Items dropped by enemies support the Group Loot game mechanic where party members roll Need or Greed on qualifying items
 - **Per-player difficulty** — HP and damage scale with party size; solo players get a reduction
@@ -25,9 +26,11 @@ Players talk to a Dungeon Master NPC, pick a difficulty, creature theme, and dun
 - **Cooldown system** — Configurable per-character cooldown between runs
 - **Persistent stats** — Tracks runs, kills, deaths, fastest clear times per character
 - **Statistics & Leaderboards** — Separate tracking for normal runs and roguelike mode. Normal stats track win rate, kills, deaths, K/D ratio, and fastest clear. Roguelike stats track highest tier, most floors, total floors cleared, and longest run. Leaderboards include Normal Fastest Clears, Roguelike Highest Tier, and Roguelike Most Floors — with your own entries highlighted
+- **AIO planner UI** — Optional `/dmui` window for previews, personal stats, and leaderboards when `mod-ale` + Rochet2 AIO are installed
 - **GM commands** — `.dm reload`, `.dm status`, `.dm list`, `.dm end`, `.dm clearcooldown`
 
 ### Roguelike Mode
+
 - **Infinite progression** — Clear a dungeon, get teleported to the next one, repeat until you wipe
 - **Escalating difficulty** — Enemy HP and damage scale per tier (linear, then exponential)
 - **Stacking stat buff** — +10% all stats per dungeon cleared (Blessing of Kings aura, reapplied on death)
@@ -36,12 +39,12 @@ Players talk to a Dungeon Master NPC, pick a difficulty, creature theme, and dun
 - **Tier-scaled rewards** — Better loot at higher tiers, with increasing epic drop chance
 - **Dungeon Provisioner** — Sell items, repair gear and buy ammo/reagents at the start of each floor
 
-
 ---
 
 ## Installation
 
 1. **Clone into modules:**
+
    ```bash
    cd azerothcore-wotlk/modules
    git clone https://github.com/your-username/mod-dungeon-master.git
@@ -50,21 +53,47 @@ Players talk to a Dungeon Master NPC, pick a difficulty, creature theme, and dun
 2. **Re-run CMake and rebuild** the server.
 
 3. **Run the world database SQL:**
+
    ```sql
    SOURCE data/sql/db-world/base/dm_setup.sql
    ```
 
 4. **Run the characters database SQL:**
+
    ```sql
    SOURCE data/sql/db-characters/base/dm_characters_setup.sql
    ```
 
 5. **Copy the config:**
+
    ```bash
    cp modules/mod-dungeon-master/conf/mod_dungeon_master.conf.dist etc/mod_dungeon_master.conf
    ```
 
-6. **Restart the server.** The Dungeon Master NPC spawns automatically in all major cities.
+6. **Optional AIO companion UI requirements:**
+   - `mod-ale` installed and enabled
+   - Rochet2 AIO present on both server and client (`lua_scripts/AIO_Server/AIO.lua`)
+   - This module's `lua_scripts/` directory installed into `bin/lua_scripts/`
+
+7. **Restart the server.** The Dungeon Master NPC spawns automatically in all major cities.
+
+### Optional AIO Companion UI
+
+If AIO is installed, this module can expose a richer companion window via:
+
+- `/dmui`
+- `/dungeonmaster`
+- `/dmplanner`
+
+The AIO window currently provides:
+
+- run planning previews for difficulty, scaling, theme, and dungeon choice
+- personal normal / roguelike stat snapshots
+- normal fastest-clear leaderboard browsing
+- roguelike leaderboard browsing by highest tier or most floors
+- a **Start Near NPC** button that sends player-safe `.dm` launch commands through the shared server validation path
+
+> The AIO window now includes a launch button, but it still only works while you are standing near a Dungeon Master NPC. That keeps the final server-side validation and access pattern aligned with the NPC flow.
 
 ---
 
@@ -104,22 +133,24 @@ The Dungeon Master NPC (entry `500000`) spawns in every major city. You can also
 
 ### Standard Mode
 
-1. Talk to the Dungeon Master NPC
-2. Choose **difficulty tier** (Novice → Grandmaster)
-3. Choose **scaling mode**:
+1. Optionally open `/dmui` first to preview your setup and review stats/leaderboards
+2. Talk to the Dungeon Master NPC
+3. Choose **difficulty tier** (Novice → Grandmaster)
+4. Choose **scaling mode**:
    - **Scale to Party** — creatures match your group's average level
    - **Use Dungeon Difficulty** — creatures stay at the tier's natural level range
-4. Choose **creature theme** (Undead, Demons, Beasts, etc.)
-5. Choose **dungeon**
-6. Confirm → teleport in → kill everything → collect rewards → teleport out
+5. Choose **creature theme** (Undead, Demons, Beasts, etc.)
+6. Choose **dungeon**
+7. Confirm → teleport in → kill everything → collect rewards → teleport out
 
-### Roguelike Mode
+### Roguelike Flow
 
-1. Talk to the NPC → select **Roguelike Challenge**
-2. Choose difficulty, scaling, and theme (or random theme each floor)
-3. Clear floor 1 → earn +10% all stats buff → auto-transition to floor 2
-4. Enemies get harder each tier; affixes kick in at tier 3+
-5. Keep going until you wipe — highest tier reached, floors cleared, and kills are saved to the roguelike leaderboard (separate from normal runs)
+1. Optionally open `/dmui` first to review roguelike records and tune your preview setup
+2. Talk to the NPC → select **Roguelike Challenge**
+3. Choose difficulty, scaling, and theme (or random theme each floor)
+4. Clear floor 1 → earn +10% all stats buff → auto-transition to floor 2
+5. Enemies get harder each tier; affixes kick in at tier 3+
+6. Keep going until you wipe — highest tier reached, floors cleared, and kills are saved to the roguelike leaderboard (separate from normal runs)
 
 ### Level Scaling
 
@@ -235,6 +266,9 @@ mod-dungeon-master/
 ├── CMakeLists.txt
 ├── conf/
 │   └── mod_dungeon_master.conf.dist
+├── lua_scripts/
+│   ├── dungeon_master_aio_client.lua  # Optional AIO client window
+│   └── dungeon_master_aio_server.lua  # Optional AIO server bridge
 ├── data/sql/
 │   ├── db-world/base/dm_setup.sql
 │   └── db-characters/base/dm_characters_setup.sql

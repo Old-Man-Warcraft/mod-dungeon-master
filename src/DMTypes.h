@@ -10,6 +10,7 @@
 #include "ObjectGuid.h"
 #include "Position.h"
 #include <algorithm>
+#include <unordered_map>
 #include <string>
 #include <vector>
 
@@ -80,6 +81,18 @@ struct DungeonInfo
     bool        IsAvailable = true;
 };
 
+struct DungeonSelectionMetrics
+{
+    uint32 SpawnPointCount = 0;
+    uint32 NativeBossCount = 0;
+    uint32 EntranceCount   = 0;
+};
+
+struct DungeonThemeProfile
+{
+    std::unordered_map<uint32, uint32> NativeTypeCounts;
+};
+
 struct SpawnPoint
 {
     Position    Pos;
@@ -105,6 +118,7 @@ struct PendingPhaseCheck
     Position    DeathPos;
     uint64      DeathTime  = 0;
     uint32      OrigEntry  = 0;
+    std::vector<ObjectGuid> NearbyEliteGuids;
     bool        Resolved   = false;
 };
 

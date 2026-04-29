@@ -17,9 +17,9 @@
 #include "RoguelikeMgr.h"
 #include "RoguelikeTypes.h"
 #include "DMConfig.h"
+#include "dm_launch_shared.h"
 #include <cstdio>
 #include <mutex>
-#include <random>
 
 using namespace DungeonMaster;
 
@@ -53,6 +53,7 @@ enum DMGossipActions
     GOSSIP_ACTION_ROGUELIKE_THEME       = 10100, // +themeId
     GOSSIP_ACTION_ROGUELIKE_QUIT        = 10200,
     GOSSIP_ACTION_ROGUELIKE_BOARD       = 10201,
+    GOSSIP_ACTION_ROGUELIKE_CONFIRM     = 10202,
 
     // Statistics & Leaderboards sub-menus
     GOSSIP_ACTION_STATS_MENU          = 10300,  // Stats & Leaderboards hub
@@ -62,15 +63,12 @@ enum DMGossipActions
     GOSSIP_ACTION_BOARD_NORMAL        = 10311,  // Normal — Fastest Clears
     GOSSIP_ACTION_BOARD_RL_TIER       = 10312,  // Roguelike — Highest Tier
     GOSSIP_ACTION_BOARD_RL_FLOORS     = 10313,  // Roguelike — Most Floors
-};
 
-struct PlayerDMSelection
-{
-    uint32 DifficultyId  = 0;
-    uint32 ThemeId       = 0;
-    uint32 MapId         = 0;
-    bool   ScaleToParty  = true;
-    bool   IsRoguelike   = false;
+    // Selection editing / back navigation
+    GOSSIP_ACTION_EDIT_DIFFICULTY     = 10400,
+    GOSSIP_ACTION_EDIT_SCALING        = 10401,
+    GOSSIP_ACTION_EDIT_THEME          = 10402,
+    GOSSIP_ACTION_EDIT_DUNGEON        = 10403,
 };
 
 static std::unordered_map<ObjectGuid, PlayerDMSelection> sSelections;
@@ -90,6 +88,18 @@ public:
             player->PlayerTalkClass->SendCloseGossip();
             return true;
         }
+
+        std::string validationError;
+        if (!ValidateDungeonMasterParty(player, validationError))
+        {
+            LOG_INFO(DM_LOG_CATEGORY, "DungeonMaster: NPC blocked {} — {}",
+                player->GetName(), validationError);
+            ChatHandler(player->GetSession()).PSendSysMessage(
+                "|cFFFF0000[Dungeon Master]|r {}.", validationError);
+            player->PlayerTalkClass->SendCloseGossip();
+            return true;
+        }
+
         if (sDungeonMasterMgr->GetSessionByPlayer(player->GetGUID()))
         {
             LOG_INFO(DM_LOG_CATEGORY, "DungeonMaster: NPC blocked {} — still in active session",
@@ -193,8 +203,17 @@ public:
         }
         else if (action >= GOSSIP_ACTION_THEME_BASE && action < GOSSIP_ACTION_DUNGEON_BASE)
         {
-            { std::lock_guard<std::mutex> lk(sSelMutex); sSelections[player->GetGUID()].ThemeId = action - GOSSIP_ACTION_THEME_BASE; }
-            ShowDungeonMenu(player, creature);
+            bool isRoguelike = false;
+            {
+                std::lock_guard<std::mutex> lk(sSelMutex);
+                sSelections[player->GetGUID()].ThemeId = action - GOSSIP_ACTION_THEME_BASE;
+                isRoguelike = sSelections[player->GetGUID()].IsRoguelike;
+            }
+
+            if (isRoguelike)
+                ShowRoguelikeConfirmMenu(player, creature);
+            else
+                ShowDungeonMenu(player, creature);
         }
         else if (action == GOSSIP_ACTION_DUNGEON_RANDOM)
         {
@@ -208,11 +227,60 @@ public:
         }
         else if (action == GOSSIP_ACTION_CONFIRM)
             StartChallenge(player, creature);
+        else if (action == GOSSIP_ACTION_ROGUELIKE_CONFIRM)
+            StartRoguelike(player, creature);
         else if (action == GOSSIP_ACTION_CANCEL)
         {
             { std::lock_guard<std::mutex> lk(sSelMutex); sSelections.erase(player->GetGUID()); }
             ShowMainMenu(player, creature);
         }
+        else if (action == GOSSIP_ACTION_EDIT_DIFFICULTY)
+        {
+            bool isRoguelike = false;
+            {
+                std::lock_guard<std::mutex> lk(sSelMutex);
+                auto it = sSelections.find(player->GetGUID());
+                if (it != sSelections.end())
+                    isRoguelike = it->second.IsRoguelike;
+            }
+
+            if (isRoguelike)
+                ShowRoguelikeDifficultyMenu(player, creature);
+            else
+                ShowDifficultyMenu(player, creature);
+        }
+        else if (action == GOSSIP_ACTION_EDIT_SCALING)
+        {
+            bool isRoguelike = false;
+            {
+                std::lock_guard<std::mutex> lk(sSelMutex);
+                auto it = sSelections.find(player->GetGUID());
+                if (it != sSelections.end())
+                    isRoguelike = it->second.IsRoguelike;
+            }
+
+            if (isRoguelike)
+                ShowRoguelikeScalingMenu(player, creature);
+            else
+                ShowScalingMenu(player, creature);
+        }
+        else if (action == GOSSIP_ACTION_EDIT_THEME)
+        {
+            bool isRoguelike = false;
+            {
+                std::lock_guard<std::mutex> lk(sSelMutex);
+                auto it = sSelections.find(player->GetGUID());
+                if (it != sSelections.end())
+                    isRoguelike = it->second.IsRoguelike;
+            }
+
+            if (isRoguelike)
+                ShowRoguelikeThemeMenu(player, creature);
+            else
+                ShowThemeMenu(player, creature);
+        }
+        else if (action == GOSSIP_ACTION_EDIT_DUNGEON)
+            ShowDungeonMenu(player, creature);
         // ---- Roguelike Actions ----
         else if (action == GOSSIP_ACTION_ROGUELIKE_START)
         {
@@ -242,7 +310,7 @@ public:
         {
             uint32 themeId = action - GOSSIP_ACTION_ROGUELIKE_THEME;
             { std::lock_guard<std::mutex> lk(sSelMutex); sSelections[player->GetGUID()].ThemeId = themeId; }
-            StartRoguelike(player, creature);
+            ShowRoguelikeConfirmMenu(player, creature);
         }
         else if (action == GOSSIP_ACTION_ROGUELIKE_QUIT)
         {
@@ -282,10 +350,10 @@ private:
     void ShowMainMenu(Player* player, Creature* creature)
     {
         player->PlayerTalkClass->ClearMenus();
-        AddGossipItemFor(player, GOSSIP_ICON_BATTLE, "Begin Challenge",
+        AddGossipItemFor(player, GOSSIP_ICON_BATTLE, "Begin Challenge |cFF808080(single dungeon)|r",
             GOSSIP_SENDER_MAIN, GOSSIP_ACTION_MAIN_START);
         if (sDMConfig->IsRoguelikeEnabled())
-            AddGossipItemFor(player, GOSSIP_ICON_BATTLE, "|cFF00FFFFRoguelike Mode|r",
+            AddGossipItemFor(player, GOSSIP_ICON_BATTLE, "|cFF00FFFFRoguelike Mode|r |cFF808080(endless floors)|r",
                 GOSSIP_SENDER_MAIN, GOSSIP_ACTION_ROGUELIKE_START);
         AddGossipItemFor(player, GOSSIP_ICON_CHAT, "How does this work?",
             GOSSIP_SENDER_MAIN, GOSSIP_ACTION_MAIN_INFO);
@@ -306,11 +374,11 @@ private:
                 snprintf(buf, sizeof(buf), "|cFF808080%s|r (Lv %u-%u) - |cFFFF0000Requires %u+|r",
                     d.Name.c_str(), d.MinLevel, d.MaxLevel, d.MinLevel);
             else if (!d.IsOnLevelFor(lvl))
-                snprintf(buf, sizeof(buf), "%s |cFF808080(Lv %u-%u — Easy)|r",
-                    d.Name.c_str(), d.MinLevel, d.MaxLevel);
+                snprintf(buf, sizeof(buf), "%s |cFF808080(Lv %u-%u — Easy)|r |cFF808080[Reward x%.1f / Mobs x%.2f]|r",
+                    d.Name.c_str(), d.MinLevel, d.MaxLevel, d.RewardMultiplier, d.MobCountMultiplier);
             else
-                snprintf(buf, sizeof(buf), "|cFF00FF00%s|r (Lv %u-%u)",
-                    d.Name.c_str(), d.MinLevel, d.MaxLevel);
+                snprintf(buf, sizeof(buf), "|cFF00FF00%s|r (Lv %u-%u) |cFF808080[Reward x%.1f / Mobs x%.2f]|r",
+                    d.Name.c_str(), d.MinLevel, d.MaxLevel, d.RewardMultiplier, d.MobCountMultiplier);
 
             AddGossipItemFor(player,
                 d.IsValidForLevel(lvl) ? GOSSIP_ICON_BATTLE : GOSSIP_ICON_CHAT,
@@ -355,7 +423,7 @@ private:
         AddGossipItemFor(player, GOSSIP_ICON_INTERACT_1, buf2,
             GOSSIP_SENDER_MAIN, GOSSIP_ACTION_SCALE_TIER);
         AddGossipItemFor(player, GOSSIP_ICON_CHAT, "|cFFFF0000<< Back|r",
-            GOSSIP_SENDER_MAIN, GOSSIP_ACTION_CANCEL);
+            GOSSIP_SENDER_MAIN, GOSSIP_ACTION_EDIT_DIFFICULTY);
         SendGossipMenuFor(player, DEFAULT_GOSSIP_MESSAGE, creature->GetGUID());
     }
 
@@ -364,7 +432,7 @@ private:
         player->PlayerTalkClass->ClearMenus();
         for (const auto& t : sDMConfig->GetThemes())
             AddGossipItemFor(player, GOSSIP_ICON_BATTLE, t.Name, GOSSIP_SENDER_MAIN, GOSSIP_ACTION_THEME_BASE + t.Id);
-        AddGossipItemFor(player, GOSSIP_ICON_CHAT, "|cFFFF0000<< Back|r", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_CANCEL);
+        AddGossipItemFor(player, GOSSIP_ICON_CHAT, "|cFFFF0000<< Back|r", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_EDIT_SCALING);
         SendGossipMenuFor(player, DEFAULT_GOSSIP_MESSAGE, creature->GetGUID());
     }
 
@@ -383,7 +451,7 @@ private:
 
         auto dungeons = sDMConfig->GetDungeonsForLevel(diff->MinLevel, diff->MaxLevel);
 
-        AddGossipItemFor(player, GOSSIP_ICON_BATTLE, "|cFFFFD700Random Dungeon|r",
+        AddGossipItemFor(player, GOSSIP_ICON_BATTLE, "|cFFFFD700Weighted Random Dungeon|r |cFF808080(recommended)|r",
             GOSSIP_SENDER_MAIN, GOSSIP_ACTION_DUNGEON_RANDOM);
 
         for (const auto* dg : dungeons)
@@ -398,7 +466,7 @@ private:
             AddGossipItemFor(player, GOSSIP_ICON_CHAT,
                 "|cFF808080No dungeons available|r", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_CANCEL);
 
-        AddGossipItemFor(player, GOSSIP_ICON_CHAT, "|cFFFF0000<< Back|r", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_CANCEL);
+        AddGossipItemFor(player, GOSSIP_ICON_CHAT, "|cFFFF0000<< Back|r", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_EDIT_THEME);
         SendGossipMenuFor(player, DEFAULT_GOSSIP_MESSAGE, creature->GetGUID());
     }
 
@@ -442,6 +510,14 @@ private:
 
         AddGossipItemFor(player, GOSSIP_ICON_BATTLE, "|cFF00FF00>> START CHALLENGE <<|r",
             GOSSIP_SENDER_MAIN, GOSSIP_ACTION_CONFIRM);
+        AddGossipItemFor(player, GOSSIP_ICON_INTERACT_1, "Change Difficulty",
+            GOSSIP_SENDER_MAIN, GOSSIP_ACTION_EDIT_DIFFICULTY);
+        AddGossipItemFor(player, GOSSIP_ICON_INTERACT_1, "Change Scaling",
+            GOSSIP_SENDER_MAIN, GOSSIP_ACTION_EDIT_SCALING);
+        AddGossipItemFor(player, GOSSIP_ICON_INTERACT_1, "Change Theme",
+            GOSSIP_SENDER_MAIN, GOSSIP_ACTION_EDIT_THEME);
+        AddGossipItemFor(player, GOSSIP_ICON_INTERACT_1, "Change Dungeon",
+            GOSSIP_SENDER_MAIN, GOSSIP_ACTION_EDIT_DUNGEON);
         AddGossipItemFor(player, GOSSIP_ICON_CHAT, "|cFFFF0000<< Cancel|r",
             GOSSIP_SENDER_MAIN, GOSSIP_ACTION_CANCEL);
         SendGossipMenuFor(player, DEFAULT_GOSSIP_MESSAGE, creature->GetGUID());
@@ -754,6 +830,50 @@ private:
                 buf, GOSSIP_SENDER_MAIN, GOSSIP_ACTION_DIFF_BASE + d.Id);
         }
         AddGossipItemFor(player, GOSSIP_ICON_CHAT, "|cFFFF0000<< Back|r",
+            GOSSIP_SENDER_MAIN, GOSSIP_ACTION_EDIT_SCALING);
+        SendGossipMenuFor(player, DEFAULT_GOSSIP_MESSAGE, creature->GetGUID());
+    }
+
+    void ShowRoguelikeConfirmMenu(Player* player, Creature* creature)
+    {
+        player->PlayerTalkClass->ClearMenus();
+
+        PlayerDMSelection sel;
+        {
+            std::lock_guard<std::mutex> lk(sSelMutex);
+            auto it = sSelections.find(player->GetGUID());
+            if (it == sSelections.end()) { player->PlayerTalkClass->SendCloseGossip(); return; }
+            sel = it->second;
+        }
+
+        DifficultyTier const* diff = sDMConfig->GetDifficulty(sel.DifficultyId);
+        Theme const* theme = sDMConfig->GetTheme(sel.ThemeId);
+        Group* group = player->GetGroup();
+        uint32 partySize = group ? group->GetMembersCount() : 1;
+
+        char buf[256];
+        ChatHandler(player->GetSession()).SendSysMessage("|cFF00FFFF========== Roguelike Summary ==========|r");
+        snprintf(buf, sizeof(buf), "  Difficulty: |cFF00FFFF%s|r", diff ? diff->Name.c_str() : "?");
+        ChatHandler(player->GetSession()).SendSysMessage(buf);
+        snprintf(buf, sizeof(buf), "  Scaling:    |cFF00FFFF%s|r",
+            sel.ScaleToParty ? "Party Level" : "Dungeon Difficulty");
+        ChatHandler(player->GetSession()).SendSysMessage(buf);
+        snprintf(buf, sizeof(buf), "  Theme Lock: |cFF00FFFF%s|r", theme ? theme->Name.c_str() : "Random");
+        ChatHandler(player->GetSession()).SendSysMessage(buf);
+        snprintf(buf, sizeof(buf), "  Party Size: |cFFFFFFFF%u|r player(s)", partySize);
+        ChatHandler(player->GetSession()).SendSysMessage(buf);
+        ChatHandler(player->GetSession()).SendSysMessage("|cFFFF0000  One wipe ends the run. Floors, affixes, and rewards escalate as you advance.|r");
+        ChatHandler(player->GetSession()).SendSysMessage("|cFF00FFFF========================================|r");
+
+        AddGossipItemFor(player, GOSSIP_ICON_BATTLE, "|cFF00FFFF>> START ROGUELIKE RUN <<|r",
+            GOSSIP_SENDER_MAIN, GOSSIP_ACTION_ROGUELIKE_CONFIRM);
+        AddGossipItemFor(player, GOSSIP_ICON_INTERACT_1, "Change Difficulty",
+            GOSSIP_SENDER_MAIN, GOSSIP_ACTION_EDIT_DIFFICULTY);
+        AddGossipItemFor(player, GOSSIP_ICON_INTERACT_1, "Change Scaling",
+            GOSSIP_SENDER_MAIN, GOSSIP_ACTION_EDIT_SCALING);
+        AddGossipItemFor(player, GOSSIP_ICON_INTERACT_1, "Change Theme",
+            GOSSIP_SENDER_MAIN, GOSSIP_ACTION_EDIT_THEME);
+        AddGossipItemFor(player, GOSSIP_ICON_CHAT, "|cFFFF0000<< Cancel|r",
             GOSSIP_SENDER_MAIN, GOSSIP_ACTION_CANCEL);
         SendGossipMenuFor(player, DEFAULT_GOSSIP_MESSAGE, creature->GetGUID());
     }
@@ -819,25 +939,7 @@ private:
           sel = it->second;
           sSelections.erase(it); }
 
-        const DifficultyTier* diff = sDMConfig->GetDifficulty(sel.DifficultyId);
-        if (!diff || !diff->IsValidForLevel(player->GetLevel()))
-        {
-            ChatHandler(player->GetSession()).SendSysMessage(
-                "|cFFFF0000[Roguelike]|r Level requirement not met!");
-            return;
-        }
-
-        uint32 runId = 0; // unused, StartRun returns bool
-        if (!sRoguelikeMgr->StartRun(player, sel.DifficultyId,
-            sel.ThemeId, sel.ScaleToParty))
-        {
-            ChatHandler(player->GetSession()).SendSysMessage(
-                "|cFFFF0000[Roguelike]|r Failed to start roguelike run!");
-            return;
-        }
-
-        ChatHandler(player->GetSession()).SendSysMessage(
-            "|cFF00FFFF[Roguelike]|r Run started! Clear dungeons to progress. Good luck!");
+        StartRoguelikeFromSelection(player, sel);
     }
 
     // ---- Launch ----
@@ -854,64 +956,7 @@ private:
           sel = it->second;
           sSelections.erase(it); }
 
-        const DifficultyTier* diff = sDMConfig->GetDifficulty(sel.DifficultyId);
-        if (!diff || !diff->IsValidForLevel(player->GetLevel()))
-        {
-            ChatHandler(player->GetSession()).SendSysMessage("|cFFFF0000[Dungeon Master]|r Level requirement not met!");
-            return;
-        }
-
-        // Resolve random dungeon
-        uint32 mapId = sel.MapId;
-        if (mapId == 0)
-        {
-            auto dgs = sDMConfig->GetDungeonsForLevel(diff->MinLevel, diff->MaxLevel);
-            if (dgs.empty()) {
-                ChatHandler(player->GetSession()).SendSysMessage("|cFFFF0000[Dungeon Master]|r No dungeons available!");
-                return; }
-            static thread_local std::mt19937 rng{ std::random_device{}() };
-            mapId = dgs[std::uniform_int_distribution<size_t>(0, dgs.size()-1)(rng)]->MapId;
-        }
-
-        Session* s = sDungeonMasterMgr->CreateSession(player, sel.DifficultyId, sel.ThemeId, mapId, sel.ScaleToParty);
-        if (!s) {
-            ChatHandler(player->GetSession()).SendSysMessage("|cFFFF0000[Dungeon Master]|r Failed to create session!");
-            return; }
-
-        if (!sDungeonMasterMgr->StartDungeon(s)) {
-            ChatHandler(player->GetSession()).SendSysMessage("|cFFFF0000[Dungeon Master]|r Failed to initialize dungeon!");
-            sDungeonMasterMgr->AbandonSession(s->SessionId); return; }
-
-        if (!sDungeonMasterMgr->TeleportPartyIn(s)) {
-            ChatHandler(player->GetSession()).SendSysMessage("|cFFFF0000[Dungeon Master]|r Teleport failed!");
-            sDungeonMasterMgr->AbandonSession(s->SessionId); return; }
-
-        if (sDMConfig->ShouldAnnounceCompletion())
-        {
-            const Theme* theme = sDMConfig->GetTheme(sel.ThemeId);
-            const DungeonInfo* dg = sDMConfig->GetDungeon(mapId);
-            char buf[256];
-            snprintf(buf, sizeof(buf),
-                "|cFF00FF00[Dungeon Master]|r |cFFFFFFFF%s|r started a |cFFFFD700%s|r |cFF00FFFF%s|r challenge!",
-                player->GetName().c_str(), diff->Name.c_str(),
-                theme ? theme->Name.c_str() : "Random");
-
-            char detail[256];
-            snprintf(detail, sizeof(detail),
-                "|cFFFFD700[Dungeon Master]|r Difficulty: |cFF00FF00%s|r  Theme: |cFF00FF00%s|r  Dungeon: |cFF00FF00%s|r  Scaling: |cFF00FF00%s|r",
-                diff->Name.c_str(),
-                theme ? theme->Name.c_str() : "Random",
-                dg ? dg->Name.c_str() : "Random",
-                sel.ScaleToParty ? "Party Level" : "Dungeon Difficulty");
-
-            // Broadcast to ALL party members
-            for (const auto& pd : s->Players)
-                if (Player* p = ObjectAccessor::FindPlayer(pd.PlayerGuid))
-                {
-                    ChatHandler(p->GetSession()).SendSysMessage(buf);
-                    ChatHandler(p->GetSession()).SendSysMessage(detail);
-                }
-        }
+        StartChallengeFromSelection(player, sel);
     }
 };
 

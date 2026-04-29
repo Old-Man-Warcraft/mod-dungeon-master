@@ -894,7 +894,7 @@ void RoguelikeMgr::ApplyBuffStacks(Player* player, uint32 runId)
     ApplyBuffAura(player, it->second.BuffStacks);
 }
 
-void RoguelikeMgr::RemoveBuffStacks(Player* player, uint32 runId)
+void RoguelikeMgr::RemoveBuffStacks(Player* player, uint32 /*runId*/)
 {
     if (!player || !player->IsInWorld()) return;
     player->RemoveAura(BUFF_SPELL_ID);
@@ -935,31 +935,7 @@ void RoguelikeMgr::SelectAffixesForTier(RoguelikeRun& run)
 
 uint32 RoguelikeMgr::SelectRandomDungeon(const RoguelikeRun& run) const
 {
-    const DifficultyTier* diff = sDMConfig->GetDifficulty(run.BaseDifficultyId);
-    if (!diff)
-    {
-        // Fallback: use broadest range
-        auto dgs = sDMConfig->GetDungeonsForLevel(1, 80);
-        if (dgs.empty()) return 0;
-        return dgs[RandInt<size_t>(0, dgs.size() - 1)]->MapId;
-    }
-
-    auto dgs = sDMConfig->GetDungeonsForLevel(diff->MinLevel, diff->MaxLevel);
-    if (dgs.empty()) return 0;
-
-    // Try to avoid repeating the same dungeon
-    if (dgs.size() > 1 && run.PreviousMapId != 0)
-    {
-        std::vector<const DungeonInfo*> filtered;
-        for (const auto* d : dgs)
-            if (d->MapId != run.PreviousMapId)
-                filtered.push_back(d);
-
-        if (!filtered.empty())
-            return filtered[RandInt<size_t>(0, filtered.size() - 1)]->MapId;
-    }
-
-    return dgs[RandInt<size_t>(0, dgs.size() - 1)]->MapId;
+    return sDungeonMasterMgr->SelectWeightedDungeon(run.BaseDifficultyId, run.ThemeId, run.PreviousMapId);
 }
 
 // Transition between dungeons

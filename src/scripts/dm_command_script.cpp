@@ -10,6 +10,9 @@
 #include "Group.h"
 #include "DungeonMasterMgr.h"
 #include "DMConfig.h"
+#include "StringConvert.h"
+#include "Tokenize.h"
+#include "dm_launch_shared.h"
 #include <cstdio>
 
 using namespace Acore::ChatCommands;
@@ -24,14 +27,121 @@ public:
     {
         static ChatCommandTable dmTable =
         {
+            { "start",         HandlePlayerStart,    SEC_PLAYER,        Console::No  },
+            { "roguelike",     HandlePlayerRogue,    SEC_PLAYER,        Console::No  },
+            { "help",          HandlePlayerHelp,     SEC_PLAYER,        Console::No  },
             { "reload",        HandleReload,        SEC_ADMINISTRATOR,  Console::Yes },
             { "status",        HandleStatus,        SEC_GAMEMASTER,     Console::Yes },
             { "list",          HandleList,           SEC_GAMEMASTER,     Console::Yes },
             { "end",           HandleEnd,            SEC_ADMINISTRATOR,  Console::No  },
             { "clearcooldown", HandleClearCD,        SEC_GAMEMASTER,     Console::No  },
+            { "",              HandlePlayerHelp,     SEC_PLAYER,         Console::No  },
         };
         static ChatCommandTable root = { { "dm", dmTable } };
         return root;
+    }
+
+    static bool HandlePlayerHelp(ChatHandler* h)
+    {
+        h->SendSysMessage("Dungeon Master player commands:");
+        h->SendSysMessage("  .dm start <difficultyId> <themeId> <mapId|0> <party|tier>");
+        h->SendSysMessage("  .dm roguelike <difficultyId> <themeId> <party|tier>");
+        h->SendSysMessage("Use these near a Dungeon Master NPC. Map ID 0 means weighted random dungeon.");
+        return true;
+    }
+
+    static bool ParseScaleMode(std::string_view token, bool& scaleToParty)
+    {
+        if (StringEqualI(token, "party") || StringEqualI(token, "scaled"))
+        {
+            scaleToParty = true;
+            return true;
+        }
+
+        if (StringEqualI(token, "tier") || StringEqualI(token, "dungeon"))
+        {
+            scaleToParty = false;
+            return true;
+        }
+
+        return false;
+    }
+
+    static bool HandlePlayerStart(ChatHandler* h, char const* args)
+    {
+        if (!h || !h->GetSession())
+            return false;
+
+        Player* player = h->GetSession()->GetPlayer();
+        if (!player)
+            return false;
+
+        std::vector<std::string_view> tokens = Acore::Tokenize(args ? args : "", ' ', false);
+        if (tokens.size() != 4)
+            return HandlePlayerHelp(h);
+
+        auto difficultyId = Acore::StringTo<uint32>(tokens[0]);
+        auto themeId = Acore::StringTo<uint32>(tokens[1]);
+        bool scaleToParty = true;
+
+        if (!difficultyId || !themeId || !ParseScaleMode(tokens[3], scaleToParty))
+        {
+            h->SendSysMessage("DungeonMaster: invalid arguments. Usage: .dm start <difficultyId> <themeId> <mapId|0> <party|tier>");
+            return false;
+        }
+
+        uint32 mapId = 0;
+        if (!StringEqualI(tokens[2], "random"))
+        {
+            auto parsedMapId = Acore::StringTo<uint32>(tokens[2]);
+            if (!parsedMapId)
+            {
+                h->SendSysMessage("DungeonMaster: invalid mapId. Use 0 or random for weighted random selection.");
+                return false;
+            }
+
+            mapId = *parsedMapId;
+        }
+
+        PlayerDMSelection selection;
+        selection.DifficultyId = *difficultyId;
+        selection.ThemeId = *themeId;
+        selection.MapId = mapId;
+        selection.ScaleToParty = scaleToParty;
+        selection.IsRoguelike = false;
+        return StartChallengeFromSelection(player, selection, true);
+    }
+
+    static bool HandlePlayerRogue(ChatHandler* h, char const* args)
+    {
+        if (!h || !h->GetSession())
+            return false;
+
+        Player* player = h->GetSession()->GetPlayer();
+        if (!player)
+            return false;
+
+        std::vector<std::string_view> tokens = Acore::Tokenize(args ? args : "", ' ', false);
+        if (tokens.size() != 3)
+            return HandlePlayerHelp(h);
+
+        auto difficultyId = Acore::StringTo<uint32>(tokens[0]);
+        auto themeId = Acore::StringTo<uint32>(tokens[1]);
+        bool scaleToParty = true;
+
+        if (!difficultyId || !themeId || !ParseScaleMode(tokens[2], scaleToParty))
+        {
+            h->SendSysMessage("DungeonMaster: invalid arguments. Usage: .dm roguelike <difficultyId> <themeId> <party|tier>");
+            return false;
+        }
+
+        PlayerDMSelection selection;
+        selection.DifficultyId = *difficultyId;
+        selection.ThemeId = *themeId;
+        selection.MapId = 0;
+        selection.ScaleToParty = scaleToParty;
+        selection.IsRoguelike = true;
+        return StartRoguelikeFromSelection(player, selection, true);
     }
 
     static bool HandleReload(ChatHandler* h)

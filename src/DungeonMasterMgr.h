@@ -92,14 +92,25 @@ public:
     uint8       ComputeEffectiveLevel(Player* leader) const;
     /// Party average (or solo level), clamped to the difficulty tier for scaling / display.
     uint8       ComputeEffectiveLevelForDifficulty(Player* leader, uint32 difficultyId) const;
+    uint32      SelectWeightedDungeon(uint32 difficultyId, uint32 themeId, uint32 previousMapId = 0) const;
 
     void   DistributeRoguelikeRewards(uint32 tier, uint8 effectiveLevel,
                                        const std::vector<ObjectGuid>& playerGuids);
 
 private:
-    std::vector<SpawnPoint> GetSpawnPointsForMap(uint32 mapId);
-    uint32 SelectCreatureForTheme(const Theme* theme, bool isBoss, uint8 bandMin, uint8 bandMax);
-    uint32 SelectDungeonBoss(const Theme* theme, uint8 bandMin, uint8 bandMax);
+    Player* GetReferencePlayer(Session const& session) const;
+    PendingPhaseCheck CreatePendingPhaseCheck(Session const& session, Creature const* creature, Player* refPlayer, uint32 origEntry) const;
+    uint32 CalculateTrashSpawnBudget(Session const& session, size_t availableTrashPoints) const;
+    std::vector<SpawnPoint> SelectTrashSpawnPoints(Session const& session, std::vector<SpawnPoint> const& availableTrashPoints) const;
+    void LoadDungeonSelectionMetrics();
+    void LoadDungeonThemeProfiles();
+    uint32 CountMapBossCandidates(uint32 mapId, Theme const* theme, uint8 bandMin, uint8 bandMax) const;
+    std::vector<SpawnPoint> GetSpawnPointsForMap(uint32 mapId, Position const& entrancePos);
+    uint32 SelectCreatureForTheme(uint32 mapId, const Theme* theme, bool isBoss, uint8 bandMin, uint8 bandMax);
+    uint32 SelectDungeonBoss(uint32 mapId, const Theme* theme, uint8 bandMin, uint8 bandMax);
+    uint32 CalculateCompletionGold(Session const* session) const;
+    uint32 CalculateRoguelikeGoldReward(uint32 tier) const;
+    uint8  RollCompletionRewardQuality() const;
 
     void   GiveGoldReward(Player* player, uint32 amount);
     void   GiveItemReward(Player* player, uint8 rewardLevel, uint8 quality);
@@ -135,6 +146,9 @@ private:
     std::unordered_map<uint32, std::vector<CreaturePoolEntry>> _creaturesByType;
     std::unordered_map<uint32, std::vector<CreaturePoolEntry>> _bossCreatures;
     std::unordered_map<uint32, std::vector<CreaturePoolEntry>> _dungeonBossPool;
+    std::unordered_map<uint32, std::unordered_map<uint32, std::vector<CreaturePoolEntry>>> _dungeonBossPoolByMap;
+    std::unordered_map<uint32, DungeonSelectionMetrics> _dungeonSelectionMetrics;
+    std::unordered_map<uint32, DungeonThemeProfile> _dungeonThemeProfiles;
 
     std::map<std::pair<uint8,uint8>, ClassLevelStatEntry> _classLevelStats;
     std::unordered_map<uint32, std::vector<ObjectGuid>> _instanceCreatureGuids;
