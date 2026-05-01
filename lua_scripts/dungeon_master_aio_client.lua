@@ -10,6 +10,7 @@ end
 
 local CHANNEL = "DMUI"
 local PLAYER_NAME = UnitName("player") or "Player"
+local DMUI_BUILD = "2026-04-29.1"
 
 local SAVED_MODE_KEY = "DungeonMasterAIO_Mode"
 local SAVED_DIFF_KEY = "DungeonMasterAIO_Difficulty"
@@ -171,10 +172,68 @@ local function cycleChoice(rows, currentId, key, dir, defaultId)
     return tonumber(rows[index][key]) or defaultId or 0
 end
 
+local function coerceBootstrap(playerName, playerLevel, partySize, difficulties, themes, dungeons, rewards, normalStats, roguelikeStats, launchPath)
+    if type(playerName) == "table" then
+        return playerName
+    end
+
+    return {
+        playerName = playerName,
+        playerLevel = playerLevel,
+        partySize = partySize,
+        difficulties = difficulties,
+        themes = themes,
+        dungeons = dungeons,
+        rewards = rewards,
+        normalStats = normalStats,
+        roguelikeStats = roguelikeStats,
+        launchPath = launchPath,
+    }
+end
+
+local function coercePreview(mode, modeLabel, scaleLabel, playerLevel, partySize,
+    difficultyId, difficultyName, difficultyMinLevel, difficultyMaxLevel,
+    healthMult, damageMult, rewardMult, mobMult,
+    themeId, themeName, mapId, dungeonName, dungeonExpansion, dungeonMinLevel, dungeonMaxLevel,
+    expectedBaseGold, itemChance, rareChance, epicChance, warnings, notes)
+    if type(mode) == "table" then
+        return mode
+    end
+
+    return {
+        mode = mode,
+        modeLabel = modeLabel,
+        scaleLabel = scaleLabel,
+        playerLevel = playerLevel,
+        partySize = partySize,
+        difficultyId = difficultyId,
+        difficultyName = difficultyName,
+        difficultyMinLevel = difficultyMinLevel,
+        difficultyMaxLevel = difficultyMaxLevel,
+        healthMult = healthMult,
+        damageMult = damageMult,
+        rewardMult = rewardMult,
+        mobMult = mobMult,
+        themeId = themeId,
+        themeName = themeName,
+        mapId = mapId,
+        dungeonName = dungeonName,
+        dungeonExpansion = dungeonExpansion,
+        dungeonMinLevel = dungeonMinLevel,
+        dungeonMaxLevel = dungeonMaxLevel,
+        expectedBaseGold = expectedBaseGold,
+        itemChance = itemChance,
+        rareChance = rareChance,
+        epicChance = epicChance,
+        warnings = warnings,
+        notes = notes,
+    }
+end
+
 local frame = CreateFrame("Frame", "DungeonMasterAIOFrame", UIParent)
 frame:SetFrameStrata("DIALOG")
 frame:SetClampedToScreen(true)
-frame:SetSize(660, 510)
+frame:SetSize(760, 560)
 frame:SetPoint("CENTER")
 frame:SetBackdrop({
     bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
@@ -213,32 +272,32 @@ closeBtn:SetPoint("TOPRIGHT", -6, -6)
 closeBtn:SetScript("OnClick", function() frame:Hide() end)
 
 local tabOverview = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-tabOverview:SetSize(120, 24)
+tabOverview:SetSize(96, 24)
 tabOverview:SetPoint("TOPLEFT", frame, "TOPLEFT", 18, -46)
 tabOverview:SetText("Overview")
 
 local tabNormal = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-tabNormal:SetSize(120, 24)
+tabNormal:SetSize(108, 24)
 tabNormal:SetPoint("LEFT", tabOverview, "RIGHT", 6, 0)
 tabNormal:SetText("Normal Board")
 
 local tabRogue = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-tabRogue:SetSize(132, 24)
+tabRogue:SetSize(118, 24)
 tabRogue:SetPoint("LEFT", tabNormal, "RIGHT", 6, 0)
 tabRogue:SetText("Roguelike Board")
 
 local tabHelp = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-tabHelp:SetSize(90, 24)
+tabHelp:SetSize(72, 24)
 tabHelp:SetPoint("LEFT", tabRogue, "RIGHT", 6, 0)
 tabHelp:SetText("Help")
 
 local refreshBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-refreshBtn:SetSize(82, 24)
+refreshBtn:SetSize(70, 24)
 refreshBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -18, -46)
 refreshBtn:SetText("Refresh")
 
 local launchBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-launchBtn:SetSize(140, 24)
+launchBtn:SetSize(120, 24)
 launchBtn:SetPoint("RIGHT", refreshBtn, "LEFT", -8, 0)
 launchBtn:SetText("Start Near NPC")
 
@@ -306,21 +365,21 @@ boardFilterBtn:SetPoint("LEFT", scaleBtn, "RIGHT", 10, 0)
 
 local npcHint = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 npcHint:SetPoint("TOPLEFT", scaleBtn, "BOTTOMLEFT", 0, -8)
-npcHint:SetWidth(300)
+npcHint:SetWidth(520)
 npcHint:SetJustifyH("LEFT")
 npcHint:SetText("Final launch still uses the Dungeon Master NPC. This AIO layer is your planning, stats, and leaderboard cockpit.")
 
 local scroll = CreateFrame("ScrollFrame", "DungeonMasterAIOFrameScroll", frame, "UIPanelScrollFrameTemplate")
-scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 22, -226)
+scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 22, -246)
 scroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -36, 42)
 
 local content = CreateFrame("Frame", nil, scroll)
-content:SetSize(580, 1)
+content:SetSize(680, 1)
 scroll:SetScrollChild(content)
 
 local body = content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
 body:SetPoint("TOPLEFT", 4, -4)
-body:SetWidth(580)
+body:SetWidth(680)
 body:SetJustifyH("LEFT")
 body:SetJustifyV("TOP")
 body:SetNonSpaceWrap(false)
@@ -377,7 +436,29 @@ local function currentDungeon()
     return findById(dungeonChoices(), state.selectedMapId, "mapId")
 end
 
+local function ensureValidSelections()
+    if state.bootstrap then
+        local difficulties = normalizeRows(state.bootstrap.difficulties, "id")
+        local themes = normalizeRows(state.bootstrap.themes, "id")
+        local dungeons = dungeonChoices()
+
+        if #difficulties > 0 and not findById(difficulties, state.selectedDifficultyId, "id") then
+            state.selectedDifficultyId = tonumber(difficulties[1].id) or 1
+        end
+
+        if #themes > 0 and not findById(themes, state.selectedThemeId, "id") then
+            state.selectedThemeId = tonumber(themes[1].id) or 1
+        end
+
+        if state.selectedMapId ~= 0 and not findById(dungeons, state.selectedMapId, "mapId") then
+            state.selectedMapId = 0
+        end
+    end
+end
+
 local function updateControls()
+    ensureValidSelections()
+
     local diff = currentDifficulty()
     local theme = currentTheme()
     local dungeon = currentDungeon()
@@ -457,15 +538,15 @@ local function renderOverview()
     lines[#lines + 1] = "|cffccaa77Dungeon Master Planner|r"
     lines[#lines + 1] = "|cff444444--------------------------------------------------------------|r"
     lines[#lines + 1] = string.format("|cffffffffMode|r: %s", p.modeLabel or "?")
-    lines[#lines + 1] = string.format("|cffffffffDifficulty|r: %s |cff888888(Lv %u-%u)|r", p.difficultyName or "?", p.difficultyMinLevel or 1, p.difficultyMaxLevel or 80)
+    lines[#lines + 1] = string.format("|cffffffffDifficulty|r: %s |cff888888(Lv %u-%u)|r", p.difficultyName or "?", tonumber(p.difficultyMinLevel) or 1, tonumber(p.difficultyMaxLevel) or 80)
     lines[#lines + 1] = string.format("|cffffffffTheme|r: %s", p.themeName or "?")
     lines[#lines + 1] = string.format("|cffffffffDungeon|r: %s", p.dungeonName or "?")
     lines[#lines + 1] = string.format("|cffffffffScaling|r: %s", p.scaleLabel or "?")
-    lines[#lines + 1] = string.format("|cffffffffPlayer level|r: %u  |cff666666·|r  |cffffffffParty size|r: %u", p.playerLevel or 1, p.partySize or 1)
+    lines[#lines + 1] = string.format("|cffffffffPlayer level|r: %u  |cff666666·|r  |cffffffffParty size|r: %u", tonumber(p.playerLevel) or 1, tonumber(p.partySize) or 1)
     lines[#lines + 1] = " "
-    lines[#lines + 1] = string.format("|cffffffffEnemy tuning|r: HP x%.2f  |cff666666·|r  Damage x%.2f  |cff666666·|r  Mob density x%.2f", p.healthMult or 1.0, p.damageMult or 1.0, p.mobMult or 1.0)
-    lines[#lines + 1] = string.format("|cffffffffReward tuning|r: base completion gold ~ |cffffd700%u|r copper  |cff666666·|r  reward x%.2f", p.expectedBaseGold or 0, p.rewardMult or 1.0)
-    lines[#lines + 1] = string.format("|cffffffffItem rolls|r: item %u%%  |cff666666·|r  rare %u%%  |cff666666·|r  epic %u%%", p.itemChance or 0, p.rareChance or 0, p.epicChance or 0)
+    lines[#lines + 1] = string.format("|cffffffffEnemy tuning|r: HP x%.2f  |cff666666·|r  Damage x%.2f  |cff666666·|r  Mob density x%.2f", tonumber(p.healthMult) or 1.0, tonumber(p.damageMult) or 1.0, tonumber(p.mobMult) or 1.0)
+    lines[#lines + 1] = string.format("|cffffffffReward tuning|r: base completion gold ~ |cffffd700%u|r copper  |cff666666·|r  reward x%.2f", tonumber(p.expectedBaseGold) or 0, tonumber(p.rewardMult) or 1.0)
+    lines[#lines + 1] = string.format("|cffffffffItem rolls|r: item %u%%  |cff666666·|r  rare %u%%  |cff666666·|r  epic %u%%", tonumber(p.itemChance) or 0, tonumber(p.rareChance) or 0, tonumber(p.epicChance) or 0)
 
     if safe_len(p.warnings) > 0 then
         lines[#lines + 1] = " "
@@ -600,8 +681,8 @@ local function renderHelp()
         local ns = bootstrap.normalStats or {}
         local rs = bootstrap.roguelikeStats or {}
         lines[#lines + 1] = "|cffffffffYour snapshot|r"
-        lines[#lines + 1] = string.format("  • Normal runs: %u total / %u completed / %u failed", ns.totalRuns or 0, ns.completedRuns or 0, ns.failedRuns or 0)
-        lines[#lines + 1] = string.format("  • Roguelike runs: %u total / highest tier %u / most floors %u", rs.totalRuns or 0, rs.highestTier or 0, rs.mostFloorsCleared or 0)
+        lines[#lines + 1] = string.format("  • Normal runs: %u total / %u completed / %u failed", tonumber(ns.totalRuns) or 0, tonumber(ns.completedRuns) or 0, tonumber(ns.failedRuns) or 0)
+        lines[#lines + 1] = string.format("  • Roguelike runs: %u total / highest tier %u / most floors %u", tonumber(rs.totalRuns) or 0, tonumber(rs.highestTier) or 0, tonumber(rs.mostFloorsCleared) or 0)
     end
 
     setBody(table.concat(lines, "\n"))
@@ -629,59 +710,55 @@ end
 modeBtn:SetScript("OnClick", function()
     state.selectedMode = state.selectedMode == "roguelike" and "normal" or "roguelike"
     updateControls()
-    requestPreview()
+    refreshActiveView(false)
 end)
 
 diffPrev:SetScript("OnClick", function()
     state.selectedDifficultyId = cycleChoice(state.bootstrap and state.bootstrap.difficulties or {}, state.selectedDifficultyId, "id", -1, 1)
     updateControls()
-    requestPreview()
+    refreshActiveView(false)
 end)
 
 diffNext:SetScript("OnClick", function()
     state.selectedDifficultyId = cycleChoice(state.bootstrap and state.bootstrap.difficulties or {}, state.selectedDifficultyId, "id", 1, 1)
     updateControls()
-    requestPreview()
+    refreshActiveView(false)
 end)
 
 themePrev:SetScript("OnClick", function()
     state.selectedThemeId = cycleChoice(state.bootstrap and state.bootstrap.themes or {}, state.selectedThemeId, "id", -1, 9)
     updateControls()
-    requestPreview()
+    refreshActiveView(false)
 end)
 
 themeNext:SetScript("OnClick", function()
     state.selectedThemeId = cycleChoice(state.bootstrap and state.bootstrap.themes or {}, state.selectedThemeId, "id", 1, 9)
     updateControls()
-    requestPreview()
+    refreshActiveView(false)
 end)
 
 mapPrev:SetScript("OnClick", function()
     state.selectedMapId = cycleChoice(dungeonChoices(), state.selectedMapId, "mapId", -1, 0)
     updateControls()
-    requestPreview()
+    refreshActiveView(false)
 end)
 
 mapNext:SetScript("OnClick", function()
     state.selectedMapId = cycleChoice(dungeonChoices(), state.selectedMapId, "mapId", 1, 0)
     updateControls()
-    requestPreview()
+    refreshActiveView(false)
 end)
 
 scaleBtn:SetScript("OnClick", function()
     state.selectedScale = state.selectedScale == "party" and "tier" or "party"
     updateControls()
-    requestPreview()
+    refreshActiveView(false)
 end)
 
 boardFilterBtn:SetScript("OnClick", function()
     state.roguelikeSort = state.roguelikeSort == "tier" and "floors" or "tier"
     updateControls()
-    if state.currentView == "rogue" then
-        requestRoguelikeBoard()
-    else
-        renderOverview()
-    end
+    refreshActiveView(false)
 end)
 
 refreshBtn:SetScript("OnClick", function()
@@ -722,7 +799,8 @@ tabHelp:SetScript("OnClick", function()
 end)
 
 AIO.AddHandlers(CHANNEL, {
-    PushBootstrap = function(payload)
+    PushBootstrap = function(playerName, playerLevel, partySize, difficulties, themes, dungeons, rewards, normalStats, roguelikeStats, launchPath)
+        local payload = coerceBootstrap(playerName, playerLevel, partySize, difficulties, themes, dungeons, rewards, normalStats, roguelikeStats, launchPath)
         state.bootstrap = payload or {}
         state.bootstrap.difficulties = normalizeRows(state.bootstrap.difficulties, "id")
         state.bootstrap.themes = normalizeRows(state.bootstrap.themes, "id")
@@ -733,8 +811,11 @@ AIO.AddHandlers(CHANNEL, {
         if state.selectedThemeId == 0 and safe_len(state.bootstrap.themes) > 0 then
             state.selectedThemeId = tonumber(state.bootstrap.themes[1].id) or 1
         end
+        ensureValidSelections()
         updateControls()
         title:SetText("Dungeon Master — " .. tostring(payload and payload.playerName or PLAYER_NAME))
+        status:SetText(string.format("Bootstrap ready: %u difficulties, %u themes, %u dungeons.",
+            safe_len(state.bootstrap.difficulties), safe_len(state.bootstrap.themes), safe_len(state.bootstrap.dungeons)))
 
         if state.currentView == "normal" then
             requestNormalBoard()
@@ -747,18 +828,33 @@ AIO.AddHandlers(CHANNEL, {
         end
     end,
 
-    PushPreview = function(preview)
+    PushPreview = function(mode, modeLabel, scaleLabel, playerLevel, partySize,
+        difficultyId, difficultyName, difficultyMinLevel, difficultyMaxLevel,
+        healthMult, damageMult, rewardMult, mobMult,
+        themeId, themeName, mapId, dungeonName, dungeonExpansion, dungeonMinLevel, dungeonMaxLevel,
+        expectedBaseGold, itemChance, rareChance, epicChance, warnings, notes)
+        local preview = coercePreview(mode, modeLabel, scaleLabel, playerLevel, partySize,
+            difficultyId, difficultyName, difficultyMinLevel, difficultyMaxLevel,
+            healthMult, damageMult, rewardMult, mobMult,
+            themeId, themeName, mapId, dungeonName, dungeonExpansion, dungeonMinLevel, dungeonMaxLevel,
+            expectedBaseGold, itemChance, rareChance, epicChance, warnings, notes)
         state.preview = preview or {}
+        status:SetText(string.format("Preview ready: %s / %s / %s",
+            tostring(state.preview.difficultyName or "?"),
+            tostring(state.preview.themeName or "?"),
+            tostring(state.preview.dungeonName or "?")))
         renderOverview()
     end,
 
     PushNormalBoard = function(rows)
         state.normalBoardRows = normalizeRows(rows, nil)
+        status:SetText(string.format("Normal leaderboard rows: %u", safe_len(state.normalBoardRows)))
         renderNormalBoard()
     end,
 
     PushRoguelikeBoard = function(rows)
         state.roguelikeBoardRows = normalizeRows(rows, nil)
+        status:SetText(string.format("Roguelike leaderboard rows: %u", safe_len(state.roguelikeBoardRows)))
         renderRoguelikeBoard()
     end,
 })
@@ -782,4 +878,4 @@ SlashCmdList["DUNGEONMASTERAIO"] = function()
     requestBootstrap()
 end
 
-print("|cff00ccff[Dungeon Master]|r AIO planner loaded — |cffffffff/dmui|r, |cffffffff/dungeonmaster|r  |cff888888(launch still uses the NPC)|r")
+print("|cff00ccff[Dungeon Master]|r AIO planner loaded (build " .. DMUI_BUILD .. ") — |cffffffff/dmui|r, |cffffffff/dungeonmaster|r  |cff888888(launch still uses the NPC)|r")

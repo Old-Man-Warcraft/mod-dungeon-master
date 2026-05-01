@@ -18,7 +18,7 @@ Players talk to a Dungeon Master NPC, pick a difficulty, creature theme, and dun
 - **Level scaling** — Scale creatures to your party's level or use the tier's natural range
 - **Any dungeon, any level** — A level 80 can run Deadmines scaled to 80, or at its original difficulty
 - **Hybrid boss selection** — Final bosses now prefer native bosses from the chosen map before relaxing to a global dungeon-boss pool, improving completion reliability and map identity.
-- **Party support** — Solo or groups up to 5
+- **Party support** — Designed for solo play and 5-player parties; mixed real-player + Playerbot groups are supported
 - **Group Loot support** — Items dropped by enemies support the Group Loot game mechanic where party members roll Need or Greed on qualifying items
 - **Per-player difficulty** — HP and damage scale with party size; solo players get a reduction
 - **Auto-resurrect** — Dead players revive at the entrance when combat ends
@@ -94,6 +94,12 @@ The AIO window currently provides:
 - a **Start Near NPC** button that sends player-safe `.dm` launch commands through the shared server validation path
 
 > The AIO window now includes a launch button, but it still only works while you are standing near a Dungeon Master NPC. That keeps the final server-side validation and access pattern aligned with the NPC flow.
+> Preview values are advisory. Final eligibility, launch permissions, party composition checks, and live tuning always come from the server-side C++ module and active config.
+
+If you change the AIO payload/schema, bump both:
+
+- the visible client build string in `lua_scripts/dungeon_master_aio_client.lua`
+- the server-side cache-bust addon name in `lua_scripts/dungeon_master_aio_server.lua`
 
 ---
 
@@ -104,7 +110,7 @@ The Dungeon Master NPC (entry `500000`) spawns in every major city. You can also
 ### Alliance
 
 | City | Location | Map | Coordinates |
-|------|----------|-----|-------------|
+| ------ | ---------- | ----- | ------------- |
 | Stormwind | Trade District, near fountain | 0 | -8842.0, 626.0, 94.3 |
 | Ironforge | The Commons, near central forge | 0 | -4918.0, -957.0, 501.5 |
 | Darnassus | Tradesman's Terrace | 1 | 9869.0, 2494.0, 1316.2 |
@@ -113,7 +119,7 @@ The Dungeon Master NPC (entry `500000`) spawns in every major city. You can also
 ### Horde
 
 | City | Location | Map | Coordinates |
-|------|----------|-----|-------------|
+| ------ | ---------- | ----- | ------------- |
 | Orgrimmar | Valley of Strength, near bank | 1 | 1676.0, -4316.0, 61.8 |
 | Thunder Bluff | High Rise, central platform | 1 | -1277.6, 73.0, 128.8 |
 | Undercity | Trade Quarter | 0 | 1637.2, 240.1, -43.1 |
@@ -122,7 +128,7 @@ The Dungeon Master NPC (entry `500000`) spawns in every major city. You can also
 ### Neutral
 
 | City | Location | Map | Coordinates |
-|------|----------|-----|-------------|
+| ------ | ---------- | ----- | ------------- |
 | Shattrath | Terrace of Light | 530 | -1850.0, 5436.0, -12.1 |
 | Dalaran | Runeweaver Square | 571 | 5807.0, 506.2, 657.6 |
 | Booty Bay | Docks / Inn level | 0 | -14406.0, 420.0, 23.7 |
@@ -130,6 +136,14 @@ The Dungeon Master NPC (entry `500000`) spawns in every major city. You can also
 ---
 
 ## How It Works
+
+### Access Rules
+
+- **Solo, normal parties, and mixed real-player + Playerbot parties are allowed.**
+- **Any party member can start a run** through the NPC, `.dm` commands, or the AIO launch button, as long as the normal validation passes.
+- The module is **balanced for up to 5 participants**. Larger groups may still be technically possible depending on your server setup, but they are **not officially supported or balance-tested**.
+- If **any member** of the party has Challenge Modes active, the run is blocked.
+- The AIO launch button and player `.dm` launch commands still require being **near a Dungeon Master NPC** so the final launch path stays aligned with the NPC flow.
 
 ### Standard Mode
 
@@ -166,21 +180,38 @@ Creatures are force-scaled to the session's target level regardless of their ori
 
 All settings live in `mod_dungeon_master.conf`. Key options:
 
+### Current shipped difficulty tiers
+
+The distributed config currently ships with these tier values:
+
+| Tier | Level Range | HP | Damage | Reward | Mob Density |
+| ------ | ------------- | ---- | -------- | -------- | ------------- |
+| Novice | 10-19 | 0.75 | 0.75 | 1.0 | 0.50 |
+| Apprentice | 20-29 | 0.95 | 0.95 | 1.5 | 0.70 |
+| Journeyman | 30-44 | 1.15 | 1.10 | 2.0 | 0.85 |
+| Expert | 45-59 | 1.45 | 1.30 | 3.0 | 1.00 |
+| Master | 60-69 | 1.80 | 1.55 | 4.0 | 1.00 |
+| Grandmaster | 70-80 | 2.30 | 1.85 | 6.0 | 1.20 |
+
 ### Scaling
 
 | Setting | Default | Description |
-|---------|---------|-------------|
+| --------- | --------- | ------------- |
 | `Scaling.LevelBand` | 3 | Creature level window: ±N levels from party |
 | `Scaling.SoloMultiplier` | 0.5 | HP/damage reduction for solo players |
 | `Scaling.PerPlayerHealth` | 0.25 | HP added per extra party member (25%) |
-| `Scaling.BossHealthMult` | 8.0 | Boss HP multiplier (on top of party scaling) |
-| `Scaling.BossDamageMult` | 1.5 | Boss damage multiplier (party scaling only, not stacked with tier) |
-| `Scaling.EliteHealthMult` | 2.0 | Elite trash HP multiplier |
+| `Scaling.PerPlayerDamage` | 0.12 | Damage added per extra party member |
+| `Scaling.EliteHealthMult` | 2.3 | Elite trash HP multiplier |
+| `Scaling.EliteDamageMult` | 1.75 | Elite trash damage multiplier |
+| `Scaling.RareHealthMult` | 4.5 | Rare spawn HP multiplier |
+| `Scaling.RareDamageMult` | 2.25 | Rare spawn damage multiplier |
+| `Scaling.BossHealthMult` | 9.5 | Boss HP multiplier (on top of party scaling) |
+| `Scaling.BossDamageMult` | 1.8 | Boss damage multiplier (party scaling only, not stacked with tier) |
 
 ### Dungeon
 
 | Setting | Default | Description |
-|---------|---------|-------------|
+| --------- | --------- | ------------- |
 | `Dungeon.BossCount` | 1 | Number of bosses per run |
 | `Dungeon.EliteChance` | 20 | % chance a trash mob spawns as elite |
 | `Dungeon.AggroRadius` | 15.0 | Detection range in yards |
@@ -190,11 +221,12 @@ All settings live in `mod_dungeon_master.conf`. Key options:
 ### Roguelike
 
 | Setting | Default | Description |
-|---------|---------|-------------|
+| --------- | --------- | ------------- |
 | `Roguelike.Enable` | 1 | Master switch for Roguelike Mode |
 | `Roguelike.TransitionDelay` | 30 | Seconds between floors |
-| `Roguelike.HpScalingPerTier` | 0.10 | +10% enemy HP per tier |
-| `Roguelike.DmgScalingPerTier` | 0.08 | +8% enemy damage per tier |
+| `Roguelike.HpScalingPerTier` | 0.12 | +12% enemy HP per tier |
+| `Roguelike.DmgScalingPerTier` | 0.10 | +10% enemy damage per tier |
+| `Roguelike.ArmorScalingPerTier` | 0.06 | +6% enemy armor per tier |
 | `Roguelike.ExponentialThreshold` | 5 | Tier where scaling goes exponential |
 | `Roguelike.ExponentialFactor` | 1.15 | Exponential growth factor |
 | `Roguelike.AffixStartTier` | 3 | First tier with an affix |
@@ -204,9 +236,11 @@ All settings live in `mod_dungeon_master.conf`. Key options:
 ### Rewards
 
 | Setting | Default | Description |
-|---------|---------|-------------|
+| --------- | --------- | ------------- |
 | `Rewards.BaseGold` | 50000 | Completion gold reward (copper) |
-| `Rewards.XPMultiplier` | 1.0 | Kill XP multiplier |
+| `Rewards.GoldPerMob` | 50 | Bonus gold per trash kill (copper) |
+| `Rewards.GoldPerBoss` | 10000 | Bonus gold per boss kill (copper) |
+| `Rewards.XPMultiplier` | 0.7 | Kill XP multiplier |
 | `Rewards.ItemChance` | 80 | % chance of item reward on completion |
 | `Rewards.RareChance` | 40 | % chance reward is rare quality |
 | `Rewards.EpicChance` | 15 | % chance reward is epic quality |
@@ -220,7 +254,7 @@ See `mod_dungeon_master.conf.dist` for the full list with descriptions.
 Affixes are Mythic+ style modifiers applied at higher tiers:
 
 | Affix | Effect |
-|-------|--------|
+| ------- | -------- |
 | **Fortified** | Trash mobs: +30% HP, +15% damage |
 | **Tyrannical** | Bosses: +40% HP, +20% damage |
 | **Raging** | All enemies: +25% damage |
@@ -234,7 +268,7 @@ Affixes stack — at tier 10+ you might face Fortified + Tyrannical + Raging sim
 ## GM Commands
 
 | Command | Access | Description |
-|---------|--------|-------------|
+| --------- | -------- | ------------- |
 | `.dm status` | GM | Show module status and active session count |
 | `.dm list` | GM | List all active sessions with details |
 | `.dm end [id]` | Admin | Force-end a session (defaults to your own) |
@@ -246,22 +280,25 @@ Affixes stack — at tier 10+ you might face Fortified + Tyrannical + Raging sim
 ## Technical Notes
 
 - **AzerothCore compatibility** — Built against the official [AzerothCore](https://github.com/azerothcore/azerothcore-wotlk) repository. No core modifications required.
-- **Thread safety** — Session maps and cooldowns are mutex-guarded for multi-player safety.
+- **Thread safety** — Session maps and cooldowns are mutex-guarded for multi-player safety. Session teardown copies data under lock, releases the lock, then teleports / rewards / cross-system work to avoid deadlocks.
 - **Async teleport handling** — 30-second grace period after teleports to prevent false "abandoned" detection.
+- **Deferred population safety** — Dungeon population is intentionally deferred from player-enter hooks until the instance has stabilized, preventing map-enter crashes during creature clearing.
 - **InstanceScript neutralization** — All boss encounters are marked DONE on populate to prevent native scripts from interfering.
 - **Debuff purging** — Lingering debuffs from despawned creatures are removed before each floor.
+- **Creature clearing strategy** — Cleanup happens in phases: tracked summoned creatures, DB-spawned creatures, then a large-radius grid sweep to catch script-spawned leftovers.
 - **Custom creature AI** — Trash creatures use `DungeonMasterCreatureAI` which patrols a 5 yd radius around spawn points, actively scans for players within aggro range (with a 1-second fallback timer for grid edge cases), and hooks `JustDied` for proper loot timing. Bosses retain their native ScriptName AI with all original spells and combat mechanics intact.
 - **Boss spell damage scaling** — Boss abilities have hard-coded damage values designed for their original level range. The unit script intercepts all incoming damage from session bosses (spells, periodic ticks, and melee) and scales it using `creature_classlevelstats` base damage ratios between the boss's template level and the session's effective level. This ensures a level-70 boss spell deals proportionally correct damage to a level-25 party.
 - **Multi-phase boss detection** — When a boss dies, the system waits 5 seconds and scans for new elite/boss creatures near the death location. If a phase-2 creature is detected, it is automatically promoted to boss status and the original death does not count as a kill.
 - **Group Loot support** — Creature loot triggers the group's Need/Greed roll system for items above the group's loot quality threshold.
 - **Boss damage scaling** — Boss damage uses only party-size scaling (not stacked with the difficulty tier's DamageMultiplier) to prevent excessive damage when combined with level scaling.
+- **Boss fallback behavior** — If a run cannot place a proper dungeon boss candidate, the system may fall back to promoting another viable creature so the run can still complete instead of soft-locking.
 - **Standard AzerothCore** — All queries use standard AzerothCore column names. No fork-specific dependencies.
 
 ---
 
 ## File Structure
 
-```
+```text
 mod-dungeon-master/
 ├── CMakeLists.txt
 ├── conf/
@@ -296,7 +333,7 @@ mod-dungeon-master/
 
 ## Tips
 
-https://ko-fi.com/trauntrow
+[Support the project on Ko-fi](https://ko-fi.com/trauntrow)
 
 ## License
 

@@ -126,30 +126,6 @@ bool ValidateDungeonMasterParty(Player* player, std::string& reason)
     if (!group)
         return true;
 
-    Player* leader = ObjectAccessor::FindPlayer(group->GetLeaderGUID());
-    bool hasBots = false;
-
-#ifdef MOD_PLAYERBOTS
-    for (GroupReference* ref = group->GetFirstMember(); ref; ref = ref->next())
-    {
-        Player* member = ref->GetSource();
-        if (!member || !member->GetSession())
-            continue;
-
-        if (member->GetSession()->IsBot())
-        {
-            hasBots = true;
-            break;
-        }
-    }
-#endif
-
-    if (hasBots && leader != player)
-    {
-        reason = "only the owner/group leader can start Dungeon Master for Playerbot groups";
-        return false;
-    }
-
     for (GroupReference* ref = group->GetFirstMember(); ref; ref = ref->next())
     {
         Player* member = ref->GetSource();
@@ -163,28 +139,6 @@ bool ValidateDungeonMasterParty(Player* player, std::string& reason)
                 member->GetName(), challengeMode);
             return false;
         }
-
-#ifdef MOD_PLAYERBOTS
-        if (!member->GetSession()->IsBot())
-        {
-            if (hasBots && member != leader)
-            {
-                reason = "owner-led Playerbot groups may only contain the owner and their bots";
-                return false;
-            }
-
-            continue;
-        }
-
-        PlayerbotAI* botAI = sPlayerbotsMgr.GetPlayerbotAI(member);
-        Player* master = botAI ? botAI->GetMaster() : nullptr;
-        if (!botAI || !master || master != leader || sPlayerbotsMgr.GetPlayerbotAI(master))
-        {
-            reason = Acore::StringFormat("bot {} is not directly owned by the group leader {}",
-                member->GetName(), leader ? leader->GetName() : "<unknown>");
-            return false;
-        }
-#endif
     }
 
     return true;

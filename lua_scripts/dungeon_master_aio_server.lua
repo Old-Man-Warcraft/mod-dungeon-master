@@ -39,6 +39,7 @@ end
 
 local CHANNEL = "DMUI"
 local MAX_ROWS = 50
+local CLIENT_ADDON_NAME = "dungeon_master_aio_client_dmui_v20260429_1"
 
 local DEFAULT_REWARDS = {
     baseGold = 50000,
@@ -532,24 +533,48 @@ AIO.AddHandlers(CHANNEL, {
     ReqBootstrap = function(player)
         local catalog = get_runtime_catalog()
         local guidLow = player:GetGUIDLow()
-        local payload = {
-            playerName = player:GetName(),
-            playerLevel = player:GetLevel(),
-            partySize = safe_group_size(player),
-            difficulties = catalog.difficulties,
-            themes = catalog.themes,
-            dungeons = catalog.dungeons,
-            rewards = catalog.rewards,
-            normalStats = query_player_stats(guidLow),
-            roguelikeStats = query_roguelike_stats(guidLow),
-            launchPath = "npc",
-        }
-        AIO.Handle(player, CHANNEL, "PushBootstrap", payload)
+        AIO.Handle(player, CHANNEL, "PushBootstrap",
+            player:GetName(),
+            player:GetLevel(),
+            safe_group_size(player),
+            catalog.difficulties,
+            catalog.themes,
+            catalog.dungeons,
+            catalog.rewards,
+            query_player_stats(guidLow),
+            query_roguelike_stats(guidLow),
+            "npc")
     end,
 
     ReqPreview = function(player, mode, difficultyId, themeId, mapId, scaleMode)
         local preview = build_preview(player, mode, difficultyId, themeId, mapId, scaleMode)
-        AIO.Handle(player, CHANNEL, "PushPreview", preview)
+        AIO.Handle(player, CHANNEL, "PushPreview",
+            preview.mode,
+            preview.modeLabel,
+            preview.scaleLabel,
+            preview.playerLevel,
+            preview.partySize,
+            preview.difficultyId,
+            preview.difficultyName,
+            preview.difficultyMinLevel,
+            preview.difficultyMaxLevel,
+            preview.healthMult,
+            preview.damageMult,
+            preview.rewardMult,
+            preview.mobMult,
+            preview.themeId,
+            preview.themeName,
+            preview.mapId,
+            preview.dungeonName,
+            preview.dungeonExpansion,
+            preview.dungeonMinLevel,
+            preview.dungeonMaxLevel,
+            preview.expectedBaseGold,
+            preview.itemChance,
+            preview.rareChance,
+            preview.epicChance,
+            preview.warnings,
+            preview.notes)
     end,
 
     ReqNormalBoard = function(player, limit, mapId, difficultyId)
@@ -568,9 +593,9 @@ local client_paths = {
 
 local added = false
 for _, rel in ipairs(client_paths) do
-    if AIO.AddAddon(rel) then
+    if AIO.AddAddon(rel, CLIENT_ADDON_NAME) then
         added = true
-        print("[DungeonMasterAIO] client addon registered: " .. rel)
+        print("[DungeonMasterAIO] client addon registered: " .. rel .. " as " .. CLIENT_ADDON_NAME)
         break
     end
 end
