@@ -82,7 +82,7 @@ private:
 
         ObjectGuid playerGuid = player->GetGUID();
 
-        if (!sDungeonMasterMgr->GetSessionByPlayer(playerGuid))
+        if (sDungeonMasterMgr->GetSessionIdByPlayer(playerGuid) == 0)
             return;
 
         if (attacker)

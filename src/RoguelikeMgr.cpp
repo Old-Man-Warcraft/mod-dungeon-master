@@ -142,7 +142,7 @@ bool RoguelikeMgr::StartRun(Player* leader, uint32 difficultyId, uint32 themeId,
     }
 
     // Check: player not in a DM session
-    if (sDungeonMasterMgr->GetSessionByPlayer(leader->GetGUID()))
+    if (sDungeonMasterMgr->GetSessionIdByPlayer(leader->GetGUID()) != 0)
     {
         ChatHandler(leader->GetSession()).SendSysMessage(
             "|cFFFF0000[Roguelike]|r You are in an active dungeon challenge!");
@@ -209,7 +209,7 @@ bool RoguelikeMgr::StartRun(Player* leader, uint32 difficultyId, uint32 themeId,
                 // Check: group member not in another run
                 if (IsPlayerInRun(m->GetGUID()))
                     continue;
-                if (sDungeonMasterMgr->GetSessionByPlayer(m->GetGUID()))
+                if (sDungeonMasterMgr->GetSessionIdByPlayer(m->GetGUID()) != 0)
                     continue;
 
                 RoguelikePlayerData md;
@@ -352,17 +352,17 @@ void RoguelikeMgr::OnDungeonCompleted(uint32 runId, uint32 sessionId)
     uint32 sessionDeaths       = 0;
     uint32 sessionMapId        = 0;
     {
-        Session* session = sDungeonMasterMgr->GetSession(sessionId);
-        if (session)
+        Session sessionSnapshot;
+        if (sDungeonMasterMgr->GetSessionSnapshot(sessionId, sessionSnapshot))
         {
-            sessionMobsKilled   = session->MobsKilled;
-            sessionBossesKilled = session->BossesKilled;
-            sessionMapId        = session->MapId;
-            for (const auto& pd : session->Players)
+            sessionMobsKilled   = sessionSnapshot.MobsKilled;
+            sessionBossesKilled = sessionSnapshot.BossesKilled;
+            sessionMapId        = sessionSnapshot.MapId;
+            for (const auto& pd : sessionSnapshot.Players)
                 sessionDeaths += pd.Deaths;
 
-            // Distribute per-floor rewards while session pointer is still valid
-            sDungeonMasterMgr->DistributeRewards(session);
+            // Distribute per-floor rewards from a stable snapshot before cleanup.
+            sDungeonMasterMgr->DistributeRewards(&sessionSnapshot);
         }
     }
 
@@ -450,12 +450,12 @@ void RoguelikeMgr::OnPartyWipe(uint32 runId)
     }
 
     // Accumulate stats from the final session
-    Session* session = sDungeonMasterMgr->GetSession(run->CurrentSessionId);
-    if (session)
+    Session sessionSnapshot;
+    if (sDungeonMasterMgr->GetSessionSnapshot(run->CurrentSessionId, sessionSnapshot))
     {
-        run->TotalMobsKilled   += session->MobsKilled;
-        run->TotalBossesKilled += session->BossesKilled;
-        for (const auto& pd : session->Players)
+        run->TotalMobsKilled   += sessionSnapshot.MobsKilled;
+        run->TotalBossesKilled += sessionSnapshot.BossesKilled;
+        for (const auto& pd : sessionSnapshot.Players)
             run->TotalDeaths += pd.Deaths;
     }
 

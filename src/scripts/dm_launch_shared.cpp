@@ -151,7 +151,7 @@ bool ValidateCommonLaunchPreconditions(Player* player, bool requireNearbyNpc, ch
         return false;
     }
 
-    if (sDungeonMasterMgr->GetSessionByPlayer(player->GetGUID()))
+    if (sDungeonMasterMgr->GetSessionIdByPlayer(player->GetGUID()) != 0)
     {
         handler.PSendSysMessage("|cFFFF0000[{}]|r You are already in an active challenge!", label);
         return false;

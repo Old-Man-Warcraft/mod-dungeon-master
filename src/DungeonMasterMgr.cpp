@@ -1077,7 +1077,7 @@ Session* DungeonMasterMgr::CreateSession(Player* leader, uint32 difficultyId,
     std::lock_guard<std::mutex> lock(_sessionMutex);
 
     // Check capacity under the lock to avoid race conditions
-    if (!CanCreateNewSession())
+    if (_activeSessions.size() >= sDMConfig->GetMaxConcurrentRuns())
         return nullptr;
 
     Session s;
@@ -3824,6 +3824,7 @@ uint32 DungeonMasterMgr::GetRemainingCooldown(ObjectGuid g) const
 
 bool DungeonMasterMgr::CanCreateNewSession() const
 {
+    std::lock_guard<std::mutex> lock(_sessionMutex);
     return _activeSessions.size() < sDMConfig->GetMaxConcurrentRuns();
 }
 
@@ -4710,7 +4711,10 @@ void DungeonMasterMgr::Update(uint32 diff)
             InstanceMap* inst = (map && map->IsDungeon()) ? map->ToInstanceMap() : nullptr;
             if (inst && sessionSnapshot.IsActive() && sessionSnapshot.TotalMobs == 0 && sessionSnapshot.TotalBosses == 0)
             {
-                Session* session = nullptr;
+                // Keep the deferred startup keyed by sessionId/snapshots for as long as possible.
+                // PopulateDungeon itself still needs the live session object, but the surrounding
+                // registration, messaging, and post-population reporting should not depend on a
+                // raw Session* surviving multiple unlocked steps during map-enter churn.
                 {
                     std::lock_guard<std::mutex> lock(_sessionMutex);
                     auto it = _activeSessions.find(sessionId);
@@ -4720,25 +4724,41 @@ void DungeonMasterMgr::Update(uint32 diff)
                             sessionId);
                         continue;
                     }
-
-                    session = &it->second;
                 }
 
-                RegisterSessionInstance(session->SessionId, inst->GetInstanceId());
+                RegisterSessionInstance(sessionId, inst->GetInstanceId());
 
-                for (const auto& pd : session->Players)
+                for (const auto& pd : sessionSnapshot.Players)
                     if (Player* player = ObjectAccessor::FindPlayer(pd.PlayerGuid))
                         if (player->GetSession())
                             ChatHandler(player->GetSession()).SendSysMessage(
                                 "|cFF00FF00[Dungeon Master]|r Preparing the challenge...");
 
-                PopulateDungeon(session, inst);
+                Session* liveSession = nullptr;
+                {
+                    std::lock_guard<std::mutex> lock(_sessionMutex);
+                    auto it = _activeSessions.find(sessionId);
+                    if (it == _activeSessions.end() || !it->second.IsActive())
+                    {
+                        LOG_INFO(DM_LOG_CATEGORY, "DungeonMaster: Session {} vanished before PopulateDungeon could run.",
+                            sessionId);
+                        continue;
+                    }
+
+                    liveSession = &it->second;
+                }
+
+                PopulateDungeon(liveSession, inst);
+
+                Session populatedSnapshot;
+                if (!GetSessionSnapshot(sessionId, populatedSnapshot))
+                    continue;
 
                 LOG_INFO(DM_LOG_CATEGORY, "DungeonMaster: Session {} — populated (map {}, mobs={}, bosses={})",
-                    session->SessionId, session->MapId,
-                    session->TotalMobs, session->TotalBosses);
+                    populatedSnapshot.SessionId, populatedSnapshot.MapId,
+                    populatedSnapshot.TotalMobs, populatedSnapshot.TotalBosses);
 
-                if (!session->IsActive())
+                if (!populatedSnapshot.IsActive())
                     continue;
 
                 char buf[256];
@@ -4746,9 +4766,9 @@ void DungeonMasterMgr::Update(uint32 diff)
                     "|cFF00FF00[Dungeon Master]|r |cFFFFFFFF%u|r enemies and "
                     "|cFFFFFFFF%u|r boss(es) spawned. Enemy level: |cFFFFFFFF%u|r "
                     "(tier band |cFFFFFFFF%u-%u|r). Good luck!",
-                    session->TotalMobs, session->TotalBosses,
-                    session->EffectiveLevel, session->LevelBandMin, session->LevelBandMax);
-                for (const auto& pd : session->Players)
+                    populatedSnapshot.TotalMobs, populatedSnapshot.TotalBosses,
+                    populatedSnapshot.EffectiveLevel, populatedSnapshot.LevelBandMin, populatedSnapshot.LevelBandMax);
+                for (const auto& pd : populatedSnapshot.Players)
                     if (Player* player = ObjectAccessor::FindPlayer(pd.PlayerGuid))
                         if (player->GetSession())
                             ChatHandler(player->GetSession()).SendSysMessage(buf);
