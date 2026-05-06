@@ -36,6 +36,9 @@ public:
     Session*  CreateSession(Player* leader, uint32 difficultyId, uint32 themeId, uint32 mapId, bool scaleToParty = true);
     Session*  GetSession(uint32 sessionId);
     Session*  GetSessionByInstance(uint32 instanceId);
+    uint32    GetSessionIdByPlayer(ObjectGuid playerGuid) const;
+    bool      GetSessionSnapshot(uint32 sessionId, Session& snapshot) const;
+    bool      GetSessionSnapshotByPlayer(ObjectGuid playerGuid, Session& snapshot) const;
     bool      HasActiveSessionForInstance(uint32 instanceId) const;
     void      RegisterSessionInstance(uint32 sessionId, uint32 instanceId);
     Session*  GetSessionByPlayer(ObjectGuid playerGuid);
@@ -47,8 +50,8 @@ public:
     bool StartDungeon(Session* session);
     bool TeleportPartyIn(Session* session);
     void TeleportPartyOut(Session* session);
-    void HandlePlayerDeath(Player* player, Session* session);
-    void HandleCreatureDeath(Creature* creature, Session* session);
+    void HandlePlayerDeath(Player* player);
+    void HandleCreatureDeath(Creature* creature, ObjectGuid playerGuid);
     void HandleBossDeath(Session* session);
     void OnCreatureDeathHook(Creature* creature);
 
@@ -92,7 +95,8 @@ public:
     uint8       ComputeEffectiveLevel(Player* leader) const;
     /// Party average (or solo level), clamped to the difficulty tier for scaling / display.
     uint8       ComputeEffectiveLevelForDifficulty(Player* leader, uint32 difficultyId) const;
-    uint32      SelectWeightedDungeon(uint32 difficultyId, uint32 themeId, uint32 previousMapId = 0) const;
+    uint32      SelectWeightedDungeon(uint32 difficultyId, uint32 themeId, uint32 previousMapId = 0,
+                                      uint8 bandMin = 0, uint8 bandMax = 0) const;
 
     void   DistributeRoguelikeRewards(uint32 tier, uint8 effectiveLevel,
                                        const std::vector<ObjectGuid>& playerGuids);
@@ -113,6 +117,7 @@ private:
     uint8  RollCompletionRewardQuality() const;
 
     void   GiveGoldReward(Player* player, uint32 amount);
+    void   GiveCompletionXP(Session* session);
     void   GiveItemReward(Player* player, uint8 rewardLevel, uint8 quality);
     void   MailItemReward(Player* player, uint8 level, uint8 quality,
                           const std::string& subject, const std::string& body);
@@ -130,11 +135,13 @@ private:
     void LoadRewardItems();
     void LoadLootPool();
     void CleanupSession(Session& session);
+    void DespawnTrackedSessionCreatures(Session const& session, std::vector<ObjectGuid> const& trackedGuids);
 
     std::unordered_map<uint32, Session>      _activeSessions;
     std::unordered_map<uint32, uint32>       _instanceToSession;
     std::unordered_map<ObjectGuid, uint32>   _playerToSession;
     uint32 _nextSessionId = 1;
+    mutable std::mutex _lifecycleMutex;
     mutable std::mutex _sessionMutex;
 
     std::unordered_map<ObjectGuid, uint64>   _cooldowns;

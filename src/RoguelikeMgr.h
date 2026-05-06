@@ -75,7 +75,10 @@ public:
 private:
     void BuildAffixPool();
     void SelectAffixesForTier(RoguelikeRun& run);
-    uint32 SelectRandomDungeon(const RoguelikeRun& run) const;
+    uint32 SelectRandomDungeon(const RoguelikeRun& run, Player* leader, uint32 floorThemeId) const;
+    uint32 ResolveFloorThemeId(uint32 requestedThemeId) const;
+    void BuildSelectionBand(Player* leader, uint32 difficultyId, bool scaleToParty,
+                            uint8& outBandMin, uint8& outBandMax) const;
     bool TransitionToNextDungeon(RoguelikeRun& run);
     void TeleportRunPlayersOut(RoguelikeRun& run);
     void AnnounceCountdown(const RoguelikeRun& run, uint32 remainingSec);

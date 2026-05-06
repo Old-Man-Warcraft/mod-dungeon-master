@@ -222,8 +222,16 @@ bool RoguelikeMgr::StartRun(Player* leader, uint32 difficultyId, uint32 themeId,
         }
     }
 
-    // Select the first dungeon
-    uint32 mapId = SelectRandomDungeon(run);
+    uint32 floorThemeId = ResolveFloorThemeId(run.ThemeId);
+    if (!floorThemeId)
+    {
+        ChatHandler(leader->GetSession()).SendSysMessage(
+            "|cFFFF0000[Roguelike]|r No roguelike themes are configured!");
+        return false;
+    }
+
+    // Select the first dungeon using the actual floor theme and actual band.
+    uint32 mapId = SelectRandomDungeon(run, leader, floorThemeId);
     if (!mapId)
     {
         ChatHandler(leader->GetSession()).SendSysMessage(
@@ -237,7 +245,7 @@ bool RoguelikeMgr::StartRun(Player* leader, uint32 difficultyId, uint32 themeId,
 
     // Create the DM session with the player's scaling choice
     Session* session = sDungeonMasterMgr->CreateSession(
-        leader, run.BaseDifficultyId, themeId, mapId, run.ScaleToParty);
+        leader, run.BaseDifficultyId, floorThemeId, mapId, run.ScaleToParty);
     if (!session)
     {
         ChatHandler(leader->GetSession()).SendSysMessage(
@@ -285,7 +293,7 @@ bool RoguelikeMgr::StartRun(Player* leader, uint32 difficultyId, uint32 themeId,
     }
 
     // Announce
-    const Theme* theme = sDMConfig->GetTheme(themeId);
+    const Theme* theme = sDMConfig->GetTheme(floorThemeId);
     char buf[256];
     snprintf(buf, sizeof(buf),
         "|cFF00FFFF[Roguelike]|r |cFFFFD700%s|r started a Roguelike Run! "
@@ -933,23 +941,69 @@ void RoguelikeMgr::SelectAffixesForTier(RoguelikeRun& run)
 
 // DUNGEON SELECTION
 
-uint32 RoguelikeMgr::SelectRandomDungeon(const RoguelikeRun& run) const
+uint32 RoguelikeMgr::ResolveFloorThemeId(uint32 requestedThemeId) const
 {
-    return sDungeonMasterMgr->SelectWeightedDungeon(run.BaseDifficultyId, run.ThemeId, run.PreviousMapId);
+    if (requestedThemeId != 0)
+        return requestedThemeId;
+
+    std::vector<uint32> concreteThemeIds;
+    std::vector<uint32> fallbackThemeIds;
+    for (const Theme& theme : sDMConfig->GetThemes())
+    {
+        fallbackThemeIds.push_back(theme.Id);
+        if (!theme.IsRandom())
+            concreteThemeIds.push_back(theme.Id);
+    }
+
+    std::vector<uint32> const& pool = !concreteThemeIds.empty() ? concreteThemeIds : fallbackThemeIds;
+    if (pool.empty())
+        return 0;
+
+    return pool[RandInt<size_t>(0, pool.size() - 1)];
+}
+
+void RoguelikeMgr::BuildSelectionBand(Player* leader, uint32 difficultyId, bool scaleToParty,
+    uint8& outBandMin, uint8& outBandMax) const
+{
+    DifficultyTier const* difficulty = sDMConfig->GetDifficulty(difficultyId);
+    if (!difficulty)
+    {
+        outBandMin = 1;
+        outBandMax = 80;
+        return;
+    }
+
+    if (!scaleToParty || !leader)
+    {
+        outBandMin = difficulty->MinLevel;
+        outBandMax = difficulty->MaxLevel;
+        return;
+    }
+
+    uint8 effectiveLevel = sDungeonMasterMgr->ComputeEffectiveLevelForDifficulty(leader, difficultyId);
+    uint8 band = sDMConfig->GetLevelBand();
+    outBandMin = (effectiveLevel > band) ? (effectiveLevel - band) : difficulty->MinLevel;
+    uint16 rawBandMax = uint16(effectiveLevel) + band;
+    outBandMax = static_cast<uint8>(std::min<uint16>(rawBandMax, difficulty->MaxLevel));
+    outBandMin = std::max(outBandMin, difficulty->MinLevel);
+    outBandMax = std::min(outBandMax, difficulty->MaxLevel);
+    if (outBandMin > outBandMax)
+        outBandMin = outBandMax;
+}
+
+uint32 RoguelikeMgr::SelectRandomDungeon(const RoguelikeRun& run, Player* leader, uint32 floorThemeId) const
+{
+    uint8 bandMin = 1;
+    uint8 bandMax = 80;
+    BuildSelectionBand(leader, run.BaseDifficultyId, run.ScaleToParty, bandMin, bandMax);
+    return sDungeonMasterMgr->SelectWeightedDungeon(run.BaseDifficultyId, floorThemeId, run.PreviousMapId,
+        bandMin, bandMax);
 }
 
 // Transition between dungeons
 
 bool RoguelikeMgr::TransitionToNextDungeon(RoguelikeRun& run)
 {
-    uint32 mapId = SelectRandomDungeon(run);
-    if (!mapId)
-    {
-        LOG_WARN(DM_LOG_CATEGORY, "RoguelikeMgr: No dungeon available for run {} tier {}",
-            run.RunId, run.CurrentTier);
-        return false;
-    }
-
     // Find leader or first online player
     Player* leader = ObjectAccessor::FindPlayer(run.LeaderGuid);
     if (!leader)
@@ -967,18 +1021,24 @@ bool RoguelikeMgr::TransitionToNextDungeon(RoguelikeRun& run)
         return false;
     }
 
+    uint32 themeId = ResolveFloorThemeId(run.ThemeId);
+    if (!themeId)
+    {
+        LOG_WARN(DM_LOG_CATEGORY, "RoguelikeMgr: No valid floor theme available for run {}", run.RunId);
+        return false;
+    }
+
+    uint32 mapId = SelectRandomDungeon(run, leader, themeId);
+    if (!mapId)
+    {
+        LOG_WARN(DM_LOG_CATEGORY, "RoguelikeMgr: No dungeon available for run {} tier {} theme {}",
+            run.RunId, run.CurrentTier, themeId);
+        return false;
+    }
+
     // Clear cooldowns (EndSession might have set them)
     for (const auto& pd : run.Players)
         sDungeonMasterMgr->ClearCooldown(pd.PlayerGuid);
-
-    // Select theme: run-locked theme or random
-    uint32 themeId = run.ThemeId;
-    if (themeId == 0)
-    {
-        const auto& themes = sDMConfig->GetThemes();
-        if (!themes.empty())
-            themeId = themes[RandInt<size_t>(0, themes.size() - 1)].Id;
-    }
 
     // Create the new DM session
     Session* session = sDungeonMasterMgr->CreateSession(

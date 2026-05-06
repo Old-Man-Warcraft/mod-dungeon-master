@@ -6,6 +6,7 @@
 #include "dm_launch_shared.h"
 
 #include "Chat.h"
+#include "DBCStores.h"
 #include "DMConfig.h"
 #include "DungeonMasterMgr.h"
 #include "Log.h"
@@ -50,6 +51,77 @@ std::string GetActiveChallengeModeName(Player* player)
             return info.Name;
 
     return {};
+}
+
+uint32 CountEligiblePartyMembers(Player* player)
+{
+    if (!player)
+        return 0;
+
+    Group* group = player->GetGroup();
+    if (!group)
+        return 1;
+
+    uint32 count = 0;
+    for (GroupReference* ref = group->GetFirstMember(); ref; ref = ref->next())
+    {
+        Player* member = ref->GetSource();
+        if (member && member->IsInWorld())
+            ++count;
+    }
+
+    return std::max<uint32>(count, 1);
+}
+
+uint32 GetDungeonMaxPlayers(uint32 mapId)
+{
+    MapEntry const* mapEntry = sMapStore.LookupEntry(mapId);
+    if (!mapEntry)
+        return DungeonMaster::MAX_PARTY_SIZE;
+
+    Difficulty difficulty = mapEntry->IsRaid() ? RAID_DIFFICULTY_10MAN_NORMAL : DUNGEON_DIFFICULTY_NORMAL;
+    if (MapDifficulty const* mapDifficulty = GetMapDifficultyData(mapId, difficulty))
+        if (mapDifficulty->maxPlayers)
+            return mapDifficulty->maxPlayers;
+
+    if (mapEntry->maxPlayers)
+        return mapEntry->maxPlayers;
+
+    return DungeonMaster::MAX_PARTY_SIZE;
+}
+
+bool ValidateSelectedDungeonGroupSize(Player* player, uint32 mapId, std::string& reason)
+{
+    if (!player)
+    {
+        reason = "invalid player session";
+        return false;
+    }
+
+    uint32 partySize = CountEligiblePartyMembers(player);
+    uint32 maxPlayers = GetDungeonMaxPlayers(mapId);
+    if (partySize <= maxPlayers)
+        return true;
+
+    DungeonMaster::DungeonInfo const* dungeon = sDMConfig->GetDungeon(mapId);
+    std::string dungeonName = dungeon ? dungeon->Name : Acore::StringFormat("map {}", mapId);
+    reason = Acore::StringFormat("{} allows at most {} player{} but your group has {} eligible member{}",
+        dungeonName,
+        maxPlayers,
+        maxPlayers == 1 ? "" : "s",
+        partySize,
+        partySize == 1 ? "" : "s");
+    return false;
+}
+
+bool ValidateRoguelikeGroupSize(Player* player, std::string& reason)
+{
+    uint32 partySize = CountEligiblePartyMembers(player);
+    if (partySize <= DungeonMaster::MAX_PARTY_SIZE)
+        return true;
+
+    reason = Acore::StringFormat("Roguelike runs allow at most {} players because the rotation uses 5-player dungeons", DungeonMaster::MAX_PARTY_SIZE);
+    return false;
 }
 
 bool ValidateCommonLaunchPreconditions(Player* player, bool requireNearbyNpc, char const* label)
@@ -192,6 +264,14 @@ bool StartChallengeFromSelection(Player* player, PlayerDMSelection const& select
         }
     }
 
+    std::string groupSizeError;
+    if (!ValidateSelectedDungeonGroupSize(player, mapId, groupSizeError))
+    {
+        ChatHandler(player->GetSession()).PSendSysMessage(
+            "|cFFFF0000[Dungeon Master]|r {}.", groupSizeError);
+        return false;
+    }
+
     Session* session = sDungeonMasterMgr->CreateSession(player, selection.DifficultyId, selection.ThemeId, mapId, selection.ScaleToParty);
     if (!session)
     {
@@ -261,6 +341,14 @@ bool StartRoguelikeFromSelection(Player* player, PlayerDMSelection const& select
     {
         ChatHandler(player->GetSession()).SendSysMessage(
             "|cFFFF0000[Roguelike]|r Invalid theme selection.");
+        return false;
+    }
+
+    std::string groupSizeError;
+    if (!ValidateRoguelikeGroupSize(player, groupSizeError))
+    {
+        ChatHandler(player->GetSession()).PSendSysMessage(
+            "|cFFFF0000[Roguelike]|r {}.", groupSizeError);
         return false;
     }
 

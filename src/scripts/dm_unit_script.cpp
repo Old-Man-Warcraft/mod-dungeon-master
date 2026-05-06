@@ -57,17 +57,14 @@ public:
                 player = killer->GetOwner()->ToPlayer();
         }
 
-        Session* session = nullptr;
-        if (player)
-            session = sDungeonMasterMgr->GetSessionByPlayer(player->GetGUID());
-
-        if (!session || !session->IsActive())
+        Session session;
+        if (!player || !sDungeonMasterMgr->GetSessionSnapshotByPlayer(player->GetGUID(), session) || !session.IsActive())
             return;
 
-        if (creature->GetMapId() != session->MapId)
+        if (creature->GetMapId() != session.MapId)
             return;
 
-        sDungeonMasterMgr->HandleCreatureDeath(creature, session);
+        sDungeonMasterMgr->HandleCreatureDeath(creature, player->GetGUID());
     }
 
 private:

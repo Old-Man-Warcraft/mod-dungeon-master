@@ -733,11 +733,19 @@ uint32 DungeonMasterMgr::CountMapBossCandidates(uint32 mapId, Theme const* theme
     return count;
 }
 
-uint32 DungeonMasterMgr::SelectWeightedDungeon(uint32 difficultyId, uint32 themeId, uint32 previousMapId) const
+uint32 DungeonMasterMgr::SelectWeightedDungeon(uint32 difficultyId, uint32 themeId, uint32 previousMapId,
+    uint8 bandMin, uint8 bandMax) const
 {
     DifficultyTier const* difficulty = sDMConfig->GetDifficulty(difficultyId);
     uint8 minLevel = difficulty ? difficulty->MinLevel : 1;
     uint8 maxLevel = difficulty ? difficulty->MaxLevel : 80;
+    bool usingExplicitBand = bandMin != 0 && bandMax != 0 && bandMin <= bandMax;
+    if (usingExplicitBand)
+    {
+        minLevel = bandMin;
+        maxLevel = bandMax;
+    }
+
     Theme const* theme = sDMConfig->GetTheme(themeId);
 
     std::vector<DungeonInfo const*> dungeons = sDMConfig->GetDungeonsForLevel(minLevel, maxLevel);
@@ -753,8 +761,26 @@ uint32 DungeonMasterMgr::SelectWeightedDungeon(uint32 difficultyId, uint32 theme
         uint32 NativeBossCandidates = 0;
     };
 
+    bool anyNativeBossMap = false;
+    if (usingExplicitBand)
+    {
+        for (DungeonInfo const* dungeon : dungeons)
+        {
+            if (!dungeon)
+                continue;
+
+            if (CountMapBossCandidates(dungeon->MapId, theme, minLevel, maxLevel) > 0)
+            {
+                anyNativeBossMap = true;
+                break;
+            }
+        }
+    }
+
     std::vector<WeightedDungeonCandidate> candidates;
     candidates.reserve(dungeons.size());
+
+    uint32 filteredBosslessMaps = 0;
 
     double totalWeight = 0.0;
     for (DungeonInfo const* dungeon : dungeons)
@@ -768,6 +794,12 @@ uint32 DungeonMasterMgr::SelectWeightedDungeon(uint32 difficultyId, uint32 theme
 
         uint32 spawnPoints = metrics.SpawnPointCount > 0 ? metrics.SpawnPointCount : 80;
         uint32 nativeBossCandidates = CountMapBossCandidates(dungeon->MapId, theme, minLevel, maxLevel);
+
+        if (usingExplicitBand && anyNativeBossMap && nativeBossCandidates == 0)
+        {
+            ++filteredBosslessMaps;
+            continue;
+        }
 
         double sizeWeight = 1.0;
         if (spawnPoints < 40)
@@ -792,6 +824,11 @@ uint32 DungeonMasterMgr::SelectWeightedDungeon(uint32 difficultyId, uint32 theme
 
     if (candidates.empty())
         return 0;
+
+    if (filteredBosslessMaps > 0)
+        LOG_INFO(DM_LOG_CATEGORY,
+            "DungeonMaster: Weighted dungeon selection filtered {} bossless map(s) for exact band {}-{} and theme '{}' (previousMap={}).",
+            filteredBosslessMaps, minLevel, maxLevel, theme ? theme->Name : "Random", previousMapId);
 
     if (totalWeight <= 0.0)
         return candidates[RandInt<size_t>(0, candidates.size() - 1)].MapId;
@@ -827,8 +864,8 @@ uint32 DungeonMasterMgr::SelectWeightedDungeon(uint32 difficultyId, uint32 theme
 
     if (DungeonInfo const* selected = sDMConfig->GetDungeon(selectedMapId))
         LOG_INFO(DM_LOG_CATEGORY,
-            "DungeonMaster: Weighted dungeon selection -> {} ({}) for difficulty {}, theme '{}', previousMap={}",
-            selected->Name, selectedMapId, difficultyId, themeName, previousMapId);
+            "DungeonMaster: Weighted dungeon selection -> {} ({}) for difficulty {}, theme '{}', band {}-{}, previousMap={}",
+            selected->Name, selectedMapId, difficultyId, themeName, minLevel, maxLevel, previousMapId);
 
     return selectedMapId;
 }
@@ -1029,6 +1066,8 @@ Session* DungeonMasterMgr::CreateSession(Player* leader, uint32 difficultyId,
                                           uint32 themeId, uint32 mapId,
                                           bool scaleToParty)
 {
+    std::lock_guard<std::mutex> lifecycleLock(_lifecycleMutex);
+
     const DifficultyTier* diff  = sDMConfig->GetDifficulty(difficultyId);
     const Theme*          theme = sDMConfig->GetTheme(themeId);
     const DungeonInfo*    dg    = sDMConfig->GetDungeon(mapId);
@@ -1182,6 +1221,39 @@ Session* DungeonMasterMgr::GetSessionByPlayer(ObjectGuid guid)
         return sit != _activeSessions.end() ? &sit->second : nullptr;
     }
     return nullptr;
+}
+
+uint32 DungeonMasterMgr::GetSessionIdByPlayer(ObjectGuid guid) const
+{
+    std::lock_guard<std::mutex> lock(_sessionMutex);
+    auto it = _playerToSession.find(guid);
+    return it != _playerToSession.end() ? it->second : 0;
+}
+
+bool DungeonMasterMgr::GetSessionSnapshot(uint32 sessionId, Session& snapshot) const
+{
+    std::lock_guard<std::mutex> lock(_sessionMutex);
+    auto it = _activeSessions.find(sessionId);
+    if (it == _activeSessions.end())
+        return false;
+
+    snapshot = it->second;
+    return true;
+}
+
+bool DungeonMasterMgr::GetSessionSnapshotByPlayer(ObjectGuid guid, Session& snapshot) const
+{
+    std::lock_guard<std::mutex> lock(_sessionMutex);
+    auto playerIt = _playerToSession.find(guid);
+    if (playerIt == _playerToSession.end())
+        return false;
+
+    auto sessionIt = _activeSessions.find(playerIt->second);
+    if (sessionIt == _activeSessions.end())
+        return false;
+
+    snapshot = sessionIt->second;
+    return true;
 }
 
 // StartDungeon / TeleportPartyIn / TeleportPartyOut
@@ -2507,59 +2579,104 @@ uint32 DungeonMasterMgr::SelectDungeonBoss(uint32 mapId, const Theme* theme, uin
 }
 
 // Death handling
-void DungeonMasterMgr::HandleCreatureDeath(Creature* creature, Session* session)
+void DungeonMasterMgr::HandleCreatureDeath(Creature* creature, ObjectGuid playerGuid)
 {
-    if (!creature || !session || !session->IsActive())
+    if (!creature)
         return;
 
-    LOG_INFO(DM_LOG_CATEGORY, "DungeonMaster: HandleCreatureDeath called for {} (GUID: {}) in session {}",
-        creature->GetName(), creature->GetGUID().GetCounter(), session->SessionId);
+    std::lock_guard<std::mutex> lifecycleLock(_lifecycleMutex);
 
-    for (auto& sc : session->SpawnedCreatures)
+    uint32 sessionId = 0;
+    Session sessionSnapshot;
+    bool haveSessionSnapshot = false;
+    bool shouldFillLoot = false;
+    bool shouldCreatePhaseCheck = false;
+    bool isBoss = false;
+
     {
-        if (sc.Guid == creature->GetGUID())
+        std::lock_guard<std::mutex> lock(_sessionMutex);
+
+        auto playerIt = _playerToSession.find(playerGuid);
+        if (playerIt == _playerToSession.end())
+            return;
+
+        sessionId = playerIt->second;
+        auto sessionIt = _activeSessions.find(sessionId);
+        if (sessionIt == _activeSessions.end())
+            return;
+
+        Session& session = sessionIt->second;
+        if (!session.IsActive() || creature->GetMapId() != session.MapId)
+            return;
+
+        LOG_INFO(DM_LOG_CATEGORY, "DungeonMaster: HandleCreatureDeath called for {} (GUID: {}) in session {}",
+            creature->GetName(), creature->GetGUID().GetCounter(), session.SessionId);
+
+        for (auto& sc : session.SpawnedCreatures)
         {
-            // Mark dead if not already (boss-AI path via OnUnitDeath may arrive
-            // here first when creatures don't use our custom AI).
-            if (!sc.IsDead)
-                sc.IsDead = true;
+            if (sc.Guid != creature->GetGUID())
+                continue;
 
             LOG_INFO(DM_LOG_CATEGORY, "DungeonMaster: Processing death for {} (Boss: {}, Elite: {}, LootFilled: {}, KillCredited: {})",
                 creature->GetName(), sc.IsBoss, sc.IsElite, sc.LootFilled, sc.KillCredited);
 
-            // ---- Loot: always fill here (OnUnitDeath fires AFTER core death processing) ----
+            sc.IsDead = true;
+            isBoss = sc.IsBoss;
+
             if (!sc.LootFilled)
             {
                 sc.LootFilled = true;
-                FillCreatureLoot(creature, session, sc.IsBoss);
+                shouldFillLoot = true;
             }
 
-            // ---- Kill credit: only once ----
             if (!sc.KillCredited)
             {
                 sc.KillCredited = true;
-                GiveKillXP(session, sc.IsBoss, sc.IsElite);
+                GiveKillXP(&session, sc.IsBoss, sc.IsElite);
 
                 if (sc.IsBoss)
                 {
-                    session->PendingPhaseChecks.push_back(
-                        CreatePendingPhaseCheck(*session, creature, nullptr, creature->GetEntry()));
-
-                    LOG_INFO(DM_LOG_CATEGORY, "DungeonMaster: Boss '{}' died — deferring kill count for phase check",
-                        creature->GetName());
+                    shouldCreatePhaseCheck = true;
                 }
                 else
                 {
-                    ++session->MobsKilled;
-                    for (auto& pd : session->Players)
+                    ++session.MobsKilled;
+                    for (auto& pd : session.Players)
                         ++pd.MobsKilled;
                 }
             }
+
+            sessionSnapshot = session;
+            haveSessionSnapshot = true;
+
             break;
         }
     }
 
-    // Completion is now handled by the phase check system in Update()
+    if (shouldFillLoot)
+        FillCreatureLoot(creature, &sessionSnapshot, isBoss);
+
+    if (shouldCreatePhaseCheck && haveSessionSnapshot)
+    {
+        PendingPhaseCheck phaseCheck = CreatePendingPhaseCheck(sessionSnapshot, creature, nullptr, creature->GetEntry());
+
+        std::lock_guard<std::mutex> lock(_sessionMutex);
+        auto sessionIt = _activeSessions.find(sessionId);
+        if (sessionIt != _activeSessions.end())
+        {
+            Session& liveSession = sessionIt->second;
+            for (auto const& sc : liveSession.SpawnedCreatures)
+            {
+                if (sc.Guid == creature->GetGUID() && sc.IsBoss && sc.IsDead)
+                {
+                    liveSession.PendingPhaseChecks.push_back(std::move(phaseCheck));
+                    LOG_INFO(DM_LOG_CATEGORY, "DungeonMaster: Boss '{}' died — deferred phase check queued for session {}",
+                        creature->GetName(), liveSession.SessionId);
+                    break;
+                }
+            }
+        }
+    }
 }
 
 void DungeonMasterMgr::HandleBossDeath(Session* session)
@@ -2608,45 +2725,11 @@ void DungeonMasterMgr::OnCreatureDeathHook(Creature* creature)
                 }
 
                 sc.IsDead = true;
-                LOG_INFO(DM_LOG_CATEGORY, "DungeonMaster: OnCreatureDeathHook processing death for {} (Boss: {}, Elite: {})",
+                LOG_INFO(DM_LOG_CATEGORY, "DungeonMaster: OnCreatureDeathHook marked {} dead (Boss: {}, Elite: {})",
                     creature->GetName(), sc.IsBoss, sc.IsElite);
 
-                // ----------------------------------------------------------
-                // IMPORTANT: Do NOT call FillCreatureLoot here!
-                // This hook fires from JustDied, which runs INSIDE
-                // Creature::setDeathState / Unit::Kill.  After JustDied
-                // returns, the core clears creature->loot and removes
-                // UNIT_DYNFLAG_LOOTABLE for creatures with no template loot
-                // table, wiping everything we added.
-                //
-                // Loot is filled in HandleCreatureDeath (OnUnitDeath hook)
-                // which fires AFTER the core's death processing completes.
-                // ----------------------------------------------------------
-
-                // Credit kill XP now (safe — doesn't depend on loot timing)
-                if (!sc.KillCredited)
-                {
-                    sc.KillCredited = true;
-                    GiveKillXP(&session, sc.IsBoss, sc.IsElite);
-
-                    if (sc.IsBoss)
-                    {
-                        session.PendingPhaseChecks.push_back(
-                            CreatePendingPhaseCheck(session, creature, nullptr, creature->GetEntry()));
-
-                        LOG_INFO(DM_LOG_CATEGORY, "DungeonMaster: Boss '{}' died — deferring kill count for phase check (entry {})",
-                            creature->GetName(), creature->GetEntry());
-                    }
-                    else
-                    {
-                        ++session.MobsKilled;
-                        for (auto& pd : session.Players)
-                            ++pd.MobsKilled;
-                    }
-                }
-
-                LOG_DEBUG(DM_LOG_CATEGORY, "DungeonMaster: Creature {} (entry {}) death handled via hook "
-                    "(session {}, boss={}).  Loot deferred to OnUnitDeath.",
+                LOG_DEBUG(DM_LOG_CATEGORY, "DungeonMaster: Creature {} (entry {}) death marked via JustDied "
+                    "(session {}, boss={}). Loot and kill credit deferred to OnUnitDeath/Update.",
                     creature->GetGUID().ToString(), creature->GetEntry(),
                     sid, sc.IsBoss);
                 return;
@@ -2655,34 +2738,74 @@ void DungeonMasterMgr::OnCreatureDeathHook(Creature* creature)
     }
 }
 
-void DungeonMasterMgr::HandlePlayerDeath(Player* player, Session* session)
+void DungeonMasterMgr::HandlePlayerDeath(Player* player)
 {
-    if (!player || !session) return;
+    if (!player)
+        return;
 
-    if (PlayerSessionData* pd = session->GetPlayerData(player->GetGUID()))
-        ++pd->Deaths;
+    std::lock_guard<std::mutex> lifecycleLock(_lifecycleMutex);
+
+    uint32 sessionId = 0;
+    Session sessionSnapshot;
+
+    {
+        std::lock_guard<std::mutex> lock(_sessionMutex);
+        auto playerIt = _playerToSession.find(player->GetGUID());
+        if (playerIt == _playerToSession.end())
+            return;
+
+        sessionId = playerIt->second;
+        auto sessionIt = _activeSessions.find(sessionId);
+        if (sessionIt == _activeSessions.end())
+            return;
+
+        Session& session = sessionIt->second;
+        if (!session.IsActive() || player->GetMapId() != session.MapId)
+            return;
+
+        if (PlayerSessionData* pd = session.GetPlayerData(player->GetGUID()))
+            ++pd->Deaths;
+
+        sessionSnapshot = session;
+    }
 
     // Block release-spirit; auto-rez instead
     player->SetFlag(PLAYER_FIELD_BYTES, PLAYER_FIELD_BYTE_NO_RELEASE_WINDOW);
     player->RemoveFlag(PLAYER_FIELD_BYTES, PLAYER_FIELD_BYTE_RELEASE_TIMER);
 
-    if (session->IsPartyWiped())
+    if (sessionSnapshot.IsPartyWiped())
     {
-        ++session->Wipes;
+        Session liveSession;
+        bool shouldHandleWipe = false;
 
-        // --- Roguelike: delegate wipe handling to RoguelikeMgr ---
-        if (session->RoguelikeRunId != 0)
         {
-            session->State   = SessionState::Failed;
-            session->EndTime = GameTime::GetGameTime().count();
-            sRoguelikeMgr->OnPartyWipe(session->RoguelikeRunId);
+            std::lock_guard<std::mutex> lock(_sessionMutex);
+            auto sessionIt = _activeSessions.find(sessionId);
+            if (sessionIt == _activeSessions.end())
+                return;
+
+            Session& session = sessionIt->second;
+            if (!session.IsActive())
+                return;
+
+            ++session.Wipes;
+
+            session.State = SessionState::Failed;
+            session.EndTime = GameTime::GetGameTime().count();
+            liveSession = session;
+            shouldHandleWipe = true;
+        }
+
+        if (!shouldHandleWipe)
+            return;
+
+        if (liveSession.RoguelikeRunId != 0)
+        {
+            sRoguelikeMgr->OnPartyWipe(liveSession.RoguelikeRunId);
             return;
         }
 
-        session->State   = SessionState::Failed;
-        session->EndTime = GameTime::GetGameTime().count();
-
-        for (const auto& psd : session->Players)
+        for (const auto& psd : liveSession.Players)
         {
             Player* p = ObjectAccessor::FindPlayer(psd.PlayerGuid);
             if (!p) continue;
@@ -2749,6 +2872,8 @@ void DungeonMasterMgr::DistributeRewards(Session* session)
     const DifficultyTier* diff = sDMConfig->GetDifficulty(session->DifficultyId);
     if (!diff) return;
 
+    GiveCompletionXP(session);
+
     uint32 lvl       = session->EffectiveLevel;
     uint64 baseGold  = sDMConfig->GetBaseGold();
     uint64 mobGold   = static_cast<uint64>(session->MobsKilled) * sDMConfig->GetGoldPerMob();
@@ -2795,34 +2920,101 @@ void DungeonMasterMgr::DistributeRewards(Session* session)
 }
 
 
-void DungeonMasterMgr::GiveKillXP(Session* session, bool isBoss, bool isElite)
+void DungeonMasterMgr::GiveCompletionXP(Session* session)
 {
-    if (!session) return;
+    if (!session)
+        return;
 
-    for (const auto& pd : session->Players)
+    uint32 normalKills = 0;
+    uint32 eliteKills = 0;
+    uint32 bossKills = 0;
+
+    for (SpawnedCreature const& creature : session->SpawnedCreatures)
     {
-        Player* p = ObjectAccessor::FindPlayer(pd.PlayerGuid);
-        if (!p || !p->IsAlive()) continue;
-        if (p->GetLevel() >= sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL)) continue;
+        if (!creature.IsDead)
+            continue;
 
-        uint32 baseXP = (p->GetLevel() * 5) + 45;
+        if (creature.IsBoss)
+            ++bossKills;
+        else if (creature.IsElite)
+            ++eliteKills;
+        else
+            ++normalKills;
+    }
 
-        float mult = 1.0f;
-        if (isBoss)       mult = 10.0f;
-        else if (isElite) mult = 2.0f;
+    uint32 xpWeight = normalKills + eliteKills * 2 + bossKills * 10;
+    float completionMult = std::max(0.0f, sDMConfig->GetXPMultiplier());
+    if (xpWeight == 0 || completionMult <= 0.0f)
+        return;
 
-        mult *= std::max(0.0f, sDMConfig->GetXPMultiplier());
+    for (PlayerSessionData const& pd : session->Players)
+    {
+        Player* player = ObjectAccessor::FindPlayer(pd.PlayerGuid);
+        if (!player || !player->IsAlive())
+            continue;
+        if (player->GetLevel() >= sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL))
+            continue;
 
-        uint32 xp = static_cast<uint32>(baseXP * mult);
+        uint8 level = player->GetLevel();
+        sScriptMgr->OnPlayerBeforeGetLevelForXPGain(player, level);
+
+        uint32 baseXP = (level * 5) + 45;
+        uint32 xp = static_cast<uint32>(baseXP * completionMult * xpWeight * player->GetQuestRate(false));
+        xp = static_cast<uint32>(xp * player->GetTotalAuraMultiplier(SPELL_AURA_MOD_XP_QUEST_PCT));
+
         if (xp == 0)
             continue;
 
-        sScriptMgr->OnPlayerGiveXP(p, xp, nullptr, PlayerXPSource::XPSOURCE_KILL);
-        p->GiveXP(xp, nullptr);
+        sScriptMgr->OnPlayerGiveXP(player, xp, nullptr, PlayerXPSource::XPSOURCE_QUEST);
+        player->GiveXP(xp, nullptr);
 
-        if (Pet* pet = p->GetPet())
-            pet->GivePetXP(p->GetGroup() ? xp / 2 : xp);
+        if (Pet* pet = player->GetPet())
+            pet->GivePetXP(player->GetGroup() ? xp / 2 : xp);
     }
+}
+
+
+void DungeonMasterMgr::GiveKillXP(Session* session, bool isBoss, bool isElite)
+{
+    (void)session;
+    (void)isBoss;
+    (void)isElite;
+}
+
+void DungeonMasterMgr::DespawnTrackedSessionCreatures(Session const& session, std::vector<ObjectGuid> const& trackedGuids)
+{
+    if (trackedGuids.empty())
+        return;
+
+    Player* referencePlayer = GetReferencePlayer(session);
+    if (!referencePlayer)
+        return;
+
+    Map* map = referencePlayer->GetMap();
+    if (!map || !map->IsDungeon())
+        return;
+
+    InstanceMap* instance = map->ToInstanceMap();
+    if (!instance)
+        return;
+
+    if (session.InstanceId != 0 && instance->GetInstanceId() != session.InstanceId)
+        return;
+
+    uint32 despawned = 0;
+    for (ObjectGuid const& guid : trackedGuids)
+    {
+        Creature* creature = instance->GetCreature(guid);
+        if (!creature || !creature->IsInWorld())
+            continue;
+
+        creature->DespawnOrUnsummon();
+        ++despawned;
+    }
+
+    if (despawned > 0)
+        LOG_INFO(DM_LOG_CATEGORY, "DungeonMaster: Session {} — pre-teardown despawned {} tracked creatures from map {} (inst {})",
+            session.SessionId, despawned, instance->GetId(), instance->GetInstanceId());
 }
 
 void DungeonMasterMgr::GiveGoldReward(Player* player, uint32 amount)
@@ -3285,8 +3477,53 @@ void DungeonMasterMgr::FillCreatureLoot(Creature* creature, Session* session, bo
 
     Loot& loot = creature->loot;
     loot.clear();
+    loot.sourceWorldObjectGUID = creature->GetGUID();
 
     uint8 level = session->EffectiveLevel;
+
+    Player* lootOwner = creature->GetLootRecipient();
+    Group* lootGroup = creature->GetLootRecipientGroup();
+    if ((!lootOwner || !lootOwner->IsInWorld()) && !session->Players.empty())
+    {
+        for (auto const& pd : session->Players)
+        {
+            Player* player = ObjectAccessor::FindPlayer(pd.PlayerGuid);
+            if (player && player->IsInWorld() && player->GetMapId() == session->MapId)
+            {
+                lootOwner = player;
+                break;
+            }
+        }
+
+        if (!lootOwner)
+        {
+            for (auto const& pd : session->Players)
+            {
+                Player* player = ObjectAccessor::FindPlayer(pd.PlayerGuid);
+                if (player && player->IsInWorld())
+                {
+                    lootOwner = player;
+                    break;
+                }
+            }
+        }
+
+        if (lootOwner)
+            lootGroup = lootOwner->GetGroup();
+    }
+
+    if (lootGroup && lootGroup->GetLootMethod() != FREE_FOR_ALL)
+    {
+        lootGroup->UpdateLooterGuid(creature, true);
+        if (ObjectGuid groupLooterGuid = lootGroup->GetLooterGuid())
+            if (Player* groupLooter = ObjectAccessor::FindPlayer(groupLooterGuid))
+                lootOwner = groupLooter;
+    }
+
+    if (lootOwner)
+        loot.lootOwnerGUID = lootOwner->GetGUID();
+    if (lootGroup && lootOwner && lootGroup->GetLootMethod() != FREE_FOR_ALL)
+        loot.roundRobinPlayer = lootOwner->GetGUID();
 
     // Pick a random party member's class for loot filtering
     uint32 lootClass = 0;
@@ -3392,18 +3629,8 @@ void DungeonMasterMgr::FillCreatureLoot(Creature* creature, Session* session, bo
     // If the killing player is in a group with Group Loot or Need Before Greed,
     // trigger the group's loot distribution system for qualifying items.
     loot.loot_type = LOOT_CORPSE;
-    Player* looter = nullptr;
-    Group*  group  = nullptr;
-    for (const auto& pd : session->Players)
-    {
-        Player* p = ObjectAccessor::FindPlayer(pd.PlayerGuid);
-        if (p && p->IsInWorld() && p->GetGroup())
-        {
-            looter = p;
-            group  = p->GetGroup();
-            break;
-        }
-    }
+    Player* looter = lootOwner;
+    Group*  group  = lootGroup;
 
     if (group && looter)
     {
@@ -3421,9 +3648,22 @@ void DungeonMasterMgr::FillCreatureLoot(Creature* creature, Session* session, bo
                 item.is_underthreshold = true;
         }
 
-        // Trigger group loot distribution — sends Need/Greed/Pass rolls
-        // to all eligible group members for qualifying items
-        group->GroupLoot(&loot, creature);
+        // Trigger the active group loot distribution mode so the corpse's
+        // internal blocked / threshold state matches the group's permissions.
+        switch (group->GetLootMethod())
+        {
+            case GROUP_LOOT:
+                group->GroupLoot(&loot, creature);
+                break;
+            case NEED_BEFORE_GREED:
+                group->NeedBeforeGreed(&loot, creature);
+                break;
+            case MASTER_LOOT:
+                group->MasterLoot(&loot, creature);
+                break;
+            default:
+                break;
+        }
 
         // Force dynamic flag update to all session players so they see the lootable corpse
         for (const auto& pd : session->Players)
@@ -3450,8 +3690,11 @@ void DungeonMasterMgr::FillCreatureLoot(Creature* creature, Session* session, bo
 // Session end / cleanup
 void DungeonMasterMgr::EndSession(uint32 sessionId, bool success)
 {
+    std::lock_guard<std::mutex> lifecycleLock(_lifecycleMutex);
+
     Session session;
     uint32 instanceId = 0;
+    std::vector<ObjectGuid> trackedGuids;
     {
         std::lock_guard<std::mutex> lock(_sessionMutex);
         auto it = _activeSessions.find(sessionId);
@@ -3463,6 +3706,9 @@ void DungeonMasterMgr::EndSession(uint32 sessionId, bool success)
 
         if (instanceId != 0)
         {
+            if (auto guidIt = _instanceCreatureGuids.find(instanceId); guidIt != _instanceCreatureGuids.end())
+                trackedGuids = guidIt->second;
+
             _instanceToSession.erase(instanceId);
             _instanceCreatureGuids.erase(instanceId);
         }
@@ -3500,6 +3746,7 @@ void DungeonMasterMgr::EndSession(uint32 sessionId, bool success)
     if (success && session.State == SessionState::Completed)
         SaveLeaderboardEntry(session);
 
+    DespawnTrackedSessionCreatures(session, trackedGuids);
     TeleportPartyOut(&session);
     CleanupSession(session);
 
@@ -3512,6 +3759,7 @@ void DungeonMasterMgr::AbandonSession(uint32 id) { EndSession(id, false); }
 
 void DungeonMasterMgr::CleanupRoguelikeSession(uint32 sessionId, bool success)
 {
+    std::lock_guard<std::mutex> lifecycleLock(_lifecycleMutex);
     std::lock_guard<std::mutex> lock(_sessionMutex);
     auto it = _activeSessions.find(sessionId);
     if (it == _activeSessions.end()) return;
@@ -4019,9 +4267,25 @@ void DungeonMasterMgr::Update(uint32 diff)
         return;
     _updateTimer = 0;
 
+    struct PendingStrayCleanup
+    {
+        ObjectGuid ReferencePlayerGuid;
+        uint32 MapId = 0;
+        std::vector<ObjectGuid> CreatureGuids;
+    };
+
+    struct PendingRevive
+    {
+        uint32 MapId = 0;
+        Position EntrancePos;
+        std::vector<ObjectGuid> PlayerGuids;
+    };
+
     std::vector<std::pair<uint32, bool>> toEnd;
     std::vector<std::pair<uint32, uint32>> roguelikeCompleted; // {runId, sessionId}
     std::vector<uint32> toPopulate;
+    std::vector<PendingStrayCleanup> strayCleanup;
+    std::vector<PendingRevive> pendingRevives;
 
     {
         std::lock_guard<std::mutex> lock(_sessionMutex);
@@ -4254,17 +4518,13 @@ void DungeonMasterMgr::Update(uint32 diff)
                             }
                         }
 
-                        for (ObjectGuid const& guid : strayGuids)
+                        if (!strayGuids.empty())
                         {
-                            Creature* stray = ObjectAccessor::GetCreature(*ref, guid);
-                            if (stray && stray->IsInWorld() && stray->IsAlive()
-                                && stray->GetEntry() != npcEntry
-                                && !stray->IsPet() && !stray->IsGuardian() && !stray->IsTotem()
-                                && ourGuids.count(stray->GetGUID()) == 0)
-                            {
-                                stray->SetRespawnTime(7 * DAY);
-                                stray->DespawnOrUnsummon();
-                            }
+                            PendingStrayCleanup cleanup;
+                            cleanup.ReferencePlayerGuid = ref->GetGUID();
+                            cleanup.MapId = session.MapId;
+                            cleanup.CreatureGuids = std::move(strayGuids);
+                            strayCleanup.push_back(std::move(cleanup));
                         }
                     }
                 }
@@ -4272,23 +4532,19 @@ void DungeonMasterMgr::Update(uint32 diff)
                 // ---- Auto-rez when out of combat ----
                 if (session.IsActive() && !session.IsGroupInCombat())
                 {
+                    PendingRevive revive;
+                    revive.MapId = session.MapId;
+                    revive.EntrancePos = session.EntrancePos;
+
                     for (const auto& pd : session.Players)
                     {
                         Player* p = ObjectAccessor::FindPlayer(pd.PlayerGuid);
                         if (p && !p->IsAlive() && p->GetMapId() == session.MapId)
-                        {
-                            p->RemoveFlag(PLAYER_FIELD_BYTES, PLAYER_FIELD_BYTE_NO_RELEASE_WINDOW);
-                            p->ResurrectPlayer(1.0f);
-                            p->SpawnCorpseBones();
-                            p->TeleportTo(session.MapId,
-                                session.EntrancePos.GetPositionX(),
-                                session.EntrancePos.GetPositionY(),
-                                session.EntrancePos.GetPositionZ(),
-                                session.EntrancePos.GetOrientation());
-                            ChatHandler(p->GetSession()).SendSysMessage(
-                                "|cFF00FF00[Dungeon Master]|r Revived at entrance. Get back in there!");
-                        }
+                            revive.PlayerGuids.push_back(pd.PlayerGuid);
                     }
+
+                    if (!revive.PlayerGuids.empty())
+                        pendingRevives.push_back(std::move(revive));
                 }
             }
 
@@ -4385,17 +4641,63 @@ void DungeonMasterMgr::Update(uint32 diff)
         }
     } // release lock
 
+    for (PendingStrayCleanup const& cleanup : strayCleanup)
+    {
+        Player* ref = ObjectAccessor::FindPlayer(cleanup.ReferencePlayerGuid);
+        if (!ref || !ref->IsInWorld() || ref->GetMapId() != cleanup.MapId)
+            continue;
+
+        for (ObjectGuid const& guid : cleanup.CreatureGuids)
+        {
+            Creature* stray = ObjectAccessor::GetCreature(*ref, guid);
+            if (!stray || !stray->IsInWorld() || !stray->IsAlive())
+                continue;
+            if (stray->GetEntry() == sDMConfig->GetNpcEntry())
+                continue;
+            if (stray->IsPet() || stray->IsGuardian() || stray->IsTotem())
+                continue;
+
+            stray->SetRespawnTime(7 * DAY);
+            stray->DespawnOrUnsummon();
+        }
+    }
+
+    for (PendingRevive const& revive : pendingRevives)
+    {
+        for (ObjectGuid const& guid : revive.PlayerGuids)
+        {
+            Player* player = ObjectAccessor::FindPlayer(guid);
+            if (!player || player->IsAlive() || player->GetMapId() != revive.MapId)
+                continue;
+
+            player->RemoveFlag(PLAYER_FIELD_BYTES, PLAYER_FIELD_BYTE_NO_RELEASE_WINDOW);
+            player->ResurrectPlayer(1.0f);
+            player->SpawnCorpseBones();
+            player->TeleportTo(revive.MapId,
+                revive.EntrancePos.GetPositionX(),
+                revive.EntrancePos.GetPositionY(),
+                revive.EntrancePos.GetPositionZ(),
+                revive.EntrancePos.GetOrientation());
+
+            if (player->GetSession())
+                ChatHandler(player->GetSession()).SendSysMessage(
+                    "|cFF00FF00[Dungeon Master]|r Revived at entrance. Get back in there!");
+        }
+    }
+
     for (uint32 sessionId : toPopulate)
     {
-        Session* session = GetSession(sessionId);
-        if (!session)
+        std::lock_guard<std::mutex> lifecycleLock(_lifecycleMutex);
+
+        Session sessionSnapshot;
+        if (!GetSessionSnapshot(sessionId, sessionSnapshot))
             continue;
 
         Player* ref = nullptr;
-        for (const auto& pd : session->Players)
+        for (const auto& pd : sessionSnapshot.Players)
         {
             Player* player = ObjectAccessor::FindPlayer(pd.PlayerGuid);
-            if (player && player->GetMapId() == session->MapId)
+            if (player && player->GetMapId() == sessionSnapshot.MapId)
             {
                 ref = player;
                 break;
@@ -4406,8 +4708,22 @@ void DungeonMasterMgr::Update(uint32 diff)
         {
             Map* map = ref->GetMap();
             InstanceMap* inst = (map && map->IsDungeon()) ? map->ToInstanceMap() : nullptr;
-            if (inst && session->IsActive() && session->TotalMobs == 0 && session->TotalBosses == 0)
+            if (inst && sessionSnapshot.IsActive() && sessionSnapshot.TotalMobs == 0 && sessionSnapshot.TotalBosses == 0)
             {
+                Session* session = nullptr;
+                {
+                    std::lock_guard<std::mutex> lock(_sessionMutex);
+                    auto it = _activeSessions.find(sessionId);
+                    if (it == _activeSessions.end() || !it->second.IsActive())
+                    {
+                        LOG_INFO(DM_LOG_CATEGORY, "DungeonMaster: Session {} disappeared before deferred population could begin.",
+                            sessionId);
+                        continue;
+                    }
+
+                    session = &it->second;
+                }
+
                 RegisterSessionInstance(session->SessionId, inst->GetInstanceId());
 
                 for (const auto& pd : session->Players)

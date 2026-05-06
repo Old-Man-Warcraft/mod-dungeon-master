@@ -21,14 +21,14 @@ public:
         if (!sDMConfig->IsEnabled() || !player)
             return;
 
-        Session* session = sDungeonMasterMgr->GetSessionByPlayer(player->GetGUID());
-        if (!session || !session->IsActive())
+        Session session;
+        if (!sDungeonMasterMgr->GetSessionSnapshotByPlayer(player->GetGUID(), session) || !session.IsActive())
             return;
 
-        if (player->GetMapId() != session->MapId)
+        if (player->GetMapId() != session.MapId)
             return;
 
-        sDungeonMasterMgr->HandlePlayerDeath(player, session);
+        sDungeonMasterMgr->HandlePlayerDeath(player);
     }
 };
 
